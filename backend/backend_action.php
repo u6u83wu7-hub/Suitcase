@@ -32,7 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $slug = strtolower(str_replace(' ', '-', $name)) . "-" . time();
 
     // 圖片資料夾
-    $upload_dir = __DIR__ . "/img/products/";
+    $upload_dir = __DIR__ . "/../img/products/";
 
     // 若資料夾不存在就建立
     if (!is_dir($upload_dir)) {

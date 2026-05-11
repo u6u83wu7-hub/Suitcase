@@ -190,7 +190,7 @@ if ($conn->connect_error) {
                     // 點擊卡片跳轉到商品詳情頁 (需帶上 id)
                     echo '<div class="product-card" onclick="location.href=\'product_detail.php?id=' . $row['product_id'] . '\'">';
                     echo '  <div class="product-img-wrapper">';
-                    echo '      <img src="' . htmlspecialchars($row["image_url"]) . '" class="product-img" alt="商品圖片">';
+                    echo '      <img src="../' . htmlspecialchars($row["image_url"]) . '" class="product-img" alt="商品圖片">';
                     echo '  </div>';
                     echo '  <div class="product-info">';
                     echo '      <div class="product-title">' . htmlspecialchars($row["name"]) . '</div>';
