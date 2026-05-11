@@ -58,7 +58,7 @@ if ($conn->connect_error) {
         .nav-text-link:hover { color: #db6b6b; }
         .sale-link { color: #e74c3c; font-weight: 600; }
 
-        .hero { position: relative; height: 100vh; background: linear-gradient(to bottom, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.1) 100%), url('img/輪播1.png') center/cover no-repeat; display: flex; align-items: center; justify-content: center; text-align: center; padding-top: 103px; }
+        .hero { position: relative; height: 100vh; background: linear-gradient(to bottom, rgba(0, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.1) 100%), url('../img/輪播1.png') center/cover no-repeat; display: flex; align-items: center; justify-content: center; text-align: center; padding-top: 103px; }
         .hero-text { color: #fff; z-index: 10; text-shadow: 0 4px 15px rgba(0,0,0,0.3); }
         .hero-text h1 { font-size: 5rem; font-weight: 800; letter-spacing: 15px; margin-bottom: 15px; animation: fadeInDown 1.2s ease-out; }
         .hero-text p { font-size: 1.4rem; font-weight: 300; letter-spacing: 4px; text-transform: uppercase; opacity: 0.95; }
