@@ -7,20 +7,6 @@ if (!isset($_SESSION['admin_id'])) {
 }
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
-
-if ($conn->connect_error) {
-    die("資料庫連線失敗");
-}
-
-<?php
-session_start();
-
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: admin_login.php");
-    exit();
-}
-
-$conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
 }
