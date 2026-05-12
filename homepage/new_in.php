@@ -1,6 +1,6 @@
 <?php
-$pageTitle = 'All Pass 行李箱專賣 | Your All-Access Pass';
-$activeNav = '';
+$pageTitle = 'NEW IN 新品 | All Pass 行李箱專賣';
+$activeNav = 'new_in';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
@@ -10,32 +10,20 @@ if ($conn->connect_error) {
 include 'header.php';
 ?>
 
-    <section class="hero">
-        <div class="hero-text">
-            <h1>ALL PASS</h1>
-            <p>Pass through all the journey with you.</p>
+    <section class="page-hero">
+        <h1>NEW IN</h1>
+        <p>最新上架商品，第一時間掌握新品動態。</p>
+        <div class="hero-actions">
+            <a href="index.php" class="hero-btn">回首頁</a>
         </div>
     </section>
 
-    <section class="trust-badges">
-        <div class="badge">🛡️ 原廠破箱保修</div>
-        <div class="badge">🚚 全館滿 $3,000 免運</div>
-        <div class="badge">💳 支援線上刷卡分期</div>
-    </section>
-
     <section class="section-container">
-        <h2 class="section-title">FEATURED ITEMS</h2>
-        
+        <h2 class="section-title">NEW ARRIVALS</h2>
+
         <div class="product-grid">
-            
             <?php
-            /**
-             * 🌟 專業連動查詢：
-             * p = products (母檔) -> 抓商品名稱與精選狀態
-             * v = product_variants (子檔) -> 抓價格
-             * i = product_images (圖床) -> 抓標記為 is_main=1 的展示圖
-             */
-           $sql = "SELECT 
+            $sql = "SELECT 
                         p.product_id, 
                         p.name, 
                         v.price, 
@@ -45,16 +33,15 @@ include 'header.php';
                         ON p.product_id = v.product_id
                     INNER JOIN product_images i 
                         ON p.product_id = i.product_id
-                    WHERE p.is_featured = 1 
-                      AND i.is_main = 1 
+                    WHERE i.is_main = 1 
                       AND p.status = 'ON SHELF'
-                    ORDER BY p.created_at DESC";
+                    ORDER BY p.created_at DESC
+                    LIMIT 12";
 
             $result = $conn->query($sql);
 
             if ($result && $result->num_rows > 0) {
-                while($row = $result->fetch_assoc()) {
-                    // 點擊卡片跳轉到商品詳情頁 (需帶上 id)
+                while ($row = $result->fetch_assoc()) {
                     echo '<div class="product-card" onclick="location.href=\'product_detail.php?id=' . $row['product_id'] . '\'">';
                     echo '  <div class="product-img-wrapper">';
                     echo '      <img src="../' . htmlspecialchars($row["image_url"]) . '" class="product-img" alt="商品圖片">';
@@ -66,10 +53,9 @@ include 'header.php';
                     echo '</div>';
                 }
             } else {
-                echo "<p style='grid-column: span 3; text-align: center; color: #999;'>目前尚無精選商品，敬請期待！</p>";
+                echo '<p class="empty-state">目前尚無新品，請稍後再回來看看。</p>';
             }
             ?>
-
         </div>
     </section>
 
