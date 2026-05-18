@@ -1,0 +1,105 @@
+/* products.css - 商品管理模組的全部樣式 */
+
+/* 全局與佈局 */
+.pm-wrap { 
+    display: grid; 
+    gap: 20px; 
+    color: #333; 
+    min-width: 0; /* 👈 核心修正：防止 Grid 網格被內部的大 Table 撐爆 */
+}
+.pm-head { display: flex; justify-content: space-between; align-items: end; gap: 12px; flex-wrap: wrap; }
+.pm-title { margin: 0; font-size: 24px; font-weight: bold; color: #1a1a1a; }
+.pm-sub { margin: 6px 0 0; color: #666; font-size: 14px; }
+
+/* 卡片與格線 */
+.pm-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+.pm-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; align-items: end; }
+.pm-col-3 { grid-column: span 3; }
+.pm-col-2 { grid-column: span 2; }
+.pm-col-12 { grid-column: span 12; }
+
+/* 表單元件 */
+.pm-input, .pm-select, .pm-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+.pm-input:focus, .pm-select:focus, .pm-textarea:focus { border-color: #3b82f6; outline: none; }
+.pm-textarea { min-height: 100px; resize: vertical; }
+label { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 6px; display: block; }
+
+/* 按鈕設計 */
+.pm-btn { border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; text-decoration: none; display: inline-block; text-align: center; }
+.pm-btn-main { background: #0f172a; color: #fff; }
+.pm-btn-main:hover { background: #334155; }
+.pm-btn-sub { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+.pm-btn-sub:hover { background: #e2e8f0; color: #0f172a; }
+.pm-btn-danger { background: #fee2e2; color: #ef4444; border: 1px solid #fecaca; }
+.pm-btn-danger:hover { background: #fecaca; color: #b91c1c; }
+.pm-btn-edit { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.pm-btn-edit:hover { background: #dbeafe; color: #1d4ed8; }
+.pm-btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* 表格設計 (優化壓縮) */
+.pm-table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 8px; }
+.pm-table { width: 100%; border-collapse: collapse; min-width: 800px; font-size: 14px; }
+.pm-table th, .pm-table td { border-bottom: 1px solid #e2e8f0; padding: 12px 10px; text-align: left; vertical-align: middle; }
+.pm-table th { background: #f8fafc; font-weight: 600; color: #475569; white-space: nowrap; }
+.pm-table tbody tr { transition: background-color 0.2s; }
+.pm-table tbody tr:hover { background-color: #f8fafc; }
+.pm-link { color: #2563eb; text-decoration: none; font-weight: 600; }
+.pm-link:hover { text-decoration: underline; color: #1d4ed8; }
+
+/* 圖片與標籤 */
+.pm-thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: #f1f5f9; display: block; border: 1px solid #e2e8f0; }
+.pm-badge { font-size: 12px; border-radius: 99px; padding: 2px 8px; display: inline-block; font-weight: 500; }
+.pm-on { background: #dcfce7; color: #166534; }
+.pm-off { background: #f1f5f9; color: #64748b; }
+.pm-featured { background: #fef3c7; color: #b45309; }
+
+/* 其他 */
+.pm-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pm-pagination { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 16px; }
+.pm-page-link { text-decoration: none; border: 1px solid #e2e8f0; padding: 6px 12px; border-radius: 6px; color: #475569; font-size: 14px; transition: 0.2s; }
+.pm-page-link:hover { background: #f1f5f9; }
+.pm-page-current { background: #0f172a; color: #fff; border-color: #0f172a; }
+.pm-page-current:hover { background: #0f172a; }
+
+/* 頁籤 */
+.pm-tabs { display: flex; gap: 8px; }
+.pm-tab { padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #475569; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; transition: all 0.2s; }
+.pm-tab:hover { background: #f1f5f9; }
+.pm-tab.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+
+/* 新增商品區塊優化 */
+.pm-section-box { border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.pm-section-title { font-size: 16px; font-weight: 600; color: #1e293b; margin: 0 0 12px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; }
+.pm-sku-row { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
+
+/* 檔案上傳區 */
+.pm-file-input {
+    display: block;
+    width: 100%;
+    min-height: 100px;
+    padding: 16px;
+    border: 2px dashed #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+    color: #475569;
+}
+.pm-file-input:hover { border-color: #3b82f6; background: #eff6ff; }
+.pm-file-input:focus { outline: none; border-color: #3b82f6; background: #eff6ff; }
+
+#tab-list, #tab-create { min-height: 560px; }
+
+@media (max-width: 960px) {
+    .pm-col-3, .pm-col-2 { grid-column: span 12; }
+}

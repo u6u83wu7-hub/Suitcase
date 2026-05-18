@@ -33,7 +33,7 @@ if (!in_array($page, $allowed)) {
     <style>
         body { margin: 0; font-family: Arial, 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #f5f5f5; }
         .app { display: flex; min-height: 100vh; }
-        .sidebar { width: 260px; background: #1a1a1a; color: #fff; padding: 24px; box-shadow: 2px 0 8px rgba(0,0,0,0.08); }
+        .sidebar { width: 260px; background: #1a1a1a; color: #fff; padding: 24px; box-shadow: 2px 0 8px rgba(0,0,0,0.08); flex-shrink: 0;}
         .brand { font-size: 18px; font-weight: 800; color: #db6b6b; margin-bottom: 18px; }
         .admin-box { background: rgba(255,255,255,0.04); padding: 12px; border-radius: 8px; margin-bottom: 18px; }
         .admin-box .name { font-weight: 700; }
@@ -42,7 +42,7 @@ if (!in_array($page, $allowed)) {
         .menu a { color: #ddd; text-decoration: none; display: block; padding: 10px 12px; border-radius: 6px; }
         .menu a:hover, .menu a.active { background: rgba(219,107,107,0.12); color: #fff; }
 
-        .main { flex: 1; padding: 28px; }
+        .main { flex: 1; padding: 28px; min-width: 0;}
         .card { background: #fff; padding: 22px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.04); }
         h1 { margin-top: 0; font-size: 20px; }
         .muted { color: #666; font-size: 14px; }
