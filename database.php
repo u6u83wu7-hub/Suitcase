@@ -1,5 +1,5 @@
 <?php
-// 開啟錯誤回報與防護罩
+// 開啟錯誤回報與防護罩，強制 PHP 把所有隱藏的錯誤直接顯示在網頁上
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);

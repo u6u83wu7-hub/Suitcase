@@ -1,43 +1,164 @@
 <?php
-// products.php - included by backend.php; assumes $conn and session already available
+// products.php - 商品管理主頁面（容器）
+// $conn 由 backend.php 提供                            
 
-// 取得分類
-$sql = "SELECT category_id, name FROM categories";
-$result = $conn->query($sql);
-?>
-
-<h1>📦 商品管理</h1>
-<p class="muted">新增商品到商城；已存在的商品請由列表管理。</p>
-
-<form action="backend_action.php" method="POST" enctype="multipart/form-data">
-
-    <label>商品名稱</label>
-    <input type="text" name="name" required>
-
-    <label>分類</label>
-    <select name="category_id">
-        <option value="">不分類</option>
-        <?php
-        if ($result) {
-            while($row = $result->fetch_assoc()){
-                echo '<option value="' . $row['category_id'] . '">' . htmlspecialchars($row['name']) . '</option>';
-            }
+//告訴它資料表的名字（例如 products）
+//它就會去資料庫把這個表裡面「有哪些欄位」查出來。
+function pmTableColumns($conn, $tableName) {
+    $cols = [];
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW COLUMNS FROM `{$safeTable}`");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $cols[] = $row['Field'];
         }
-        ?>
-    </select>
+    }
+    return $cols;
+}
 
-    <label>價格</label>
-    <input type="number" name="price" required>
+// ===== 數據初始化 =====
 
-    <label>庫存</label>
-    <input type="number" name="stock" required>
+// 分頁設定，一頁只顯示 10 筆商品
+$perPage = 10;
+$currentPage = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
+$offset = ($currentPage - 1) * $perPage;
 
-    <label>商品圖片</label>
-    <input type="file" name="product_images[]" multiple required>
+// 取得篩選條件
+$keyword = isset($_GET['keyword']) ? trim($_GET['keyword']) : '';
+$categoryFilter = isset($_GET['category_filter']) ? trim($_GET['category_filter']) : '';
+$statusFilter = isset($_GET['status_filter']) ? trim($_GET['status_filter']) : '';
+$featuredFilter = isset($_GET['featured_filter']) ? trim($_GET['featured_filter']) : '';
 
-    <label><input type="checkbox" name="is_featured" value="1" checked> 首頁精選商品</label>
+// 取得分類列表
+$categories = [];
+$categorySql = "SELECT category_id, name FROM categories ORDER BY name ASC";
+$categoryResult = $conn->query($categorySql);
+if ($categoryResult) {
+    while ($cat = $categoryResult->fetch_assoc()) {
+        $categories[] = $cat;
+    }
+}
 
-    <br><br>
-    <button type="submit">發布商品</button>
+// 翻譯篩選條件，構建 WHERE 條件
+$conditions = [];
+if ($keyword !== '') {
+    $safeKeyword = $conn->real_escape_string($keyword);
+    $conditions[] = "p.name LIKE '%{$safeKeyword}%'";
+}
+if ($categoryFilter !== '') {
+    if ($categoryFilter === 'none') {
+        $conditions[] = "p.primary_category_id IS NULL";
+    } else {
+        $conditions[] = "p.primary_category_id = " . intval($categoryFilter);
+    }
+}
+if ($statusFilter !== '') {
+    $safeStatus = $conn->real_escape_string($statusFilter);
+    $conditions[] = "p.status = '{$safeStatus}'";
+}
+if ($featuredFilter !== '') {
+    $conditions[] = "p.is_featured = " . intval($featuredFilter);
+}
 
-</form>
+$whereClause = '';
+if (!empty($conditions)) {
+    $whereClause = 'WHERE ' . implode(' AND ', $conditions);
+}
+
+// 取得表字段
+$productCols = pmTableColumns($conn, 'products');
+$imageCols = pmTableColumns($conn, 'product_images');
+
+// 排序設定
+$productOrderBy = in_array('created_at', $productCols, true)
+    ? 'p.created_at DESC'
+    : 'p.product_id DESC';
+
+$imageOrderParts = [];
+if (in_array('is_main', $imageCols, true)) {
+    $imageOrderParts[] = 'pi.is_main DESC';
+}
+if (in_array('display_order', $imageCols, true)) {
+    $imageOrderParts[] = 'pi.display_order ASC';
+}
+if (in_array('image_id', $imageCols, true)) {
+    $imageOrderParts[] = 'pi.image_id ASC';
+}
+if (empty($imageOrderParts)) {
+    $imageOrderParts[] = 'pi.product_id ASC';
+}
+$imageOrderBy = implode(', ', $imageOrderParts);
+
+// 計算總數和分頁
+$countSql = "SELECT COUNT(*) AS total FROM products p {$whereClause}";
+$countResult = $conn->query($countSql);
+$totalProducts = ($countResult && $countResult->num_rows > 0) ? intval($countResult->fetch_assoc()['total']) : 0;
+$totalPages = max(1, ceil($totalProducts / $perPage));
+
+// 查詢商品列表、合併規格資料、找封面圖、套用條件與分頁
+$productSql = "
+    SELECT
+        p.product_id,
+        p.name,
+        p.primary_category_id,
+        p.status,
+        p.is_featured,
+        COUNT(v.product_id) AS sku_count,
+        COALESCE(SUM(v.stock_available), 0) AS total_stock,
+        MIN(v.price) AS min_price,
+        MAX(v.price) AS max_price,
+        (
+            SELECT pi.image_url
+            FROM product_images pi
+            WHERE pi.product_id = p.product_id
+            ORDER BY {$imageOrderBy}
+            LIMIT 1
+        ) AS main_image
+    FROM products p
+    LEFT JOIN product_variants v ON v.product_id = p.product_id
+    {$whereClause}
+    GROUP BY p.product_id
+    ORDER BY {$productOrderBy}
+    LIMIT {$offset}, {$perPage}
+";
+$productResult = $conn->query($productSql);
+$productQueryError = $productResult ? '' : $conn->error;
+
+//處理網址(記住你現在的搜尋條件，然後替換掉頁碼。)
+function buildFilterQuery(array $overrides = []) {
+    $base = [
+        'page' => 'products',
+        'keyword' => isset($_GET['keyword']) ? $_GET['keyword'] : '',
+        'category_filter' => isset($_GET['category_filter']) ? $_GET['category_filter'] : '',
+        'status_filter' => isset($_GET['status_filter']) ? $_GET['status_filter'] : '',
+        'featured_filter' => isset($_GET['featured_filter']) ? $_GET['featured_filter'] : '',
+        'p' => isset($_GET['p']) ? $_GET['p'] : 1,
+    ];
+    $merged = array_merge($base, $overrides);
+    return 'backend.php?' . http_build_query($merged);
+}
+
+//畫出了後台的標題、切換「商品列表」與「新增商品」的兩個按鈕。
+?>
+<link rel="stylesheet" href="../css/products.css">
+
+<div class="pm-wrap">
+    <div class="pm-head">
+        <div>
+            <h1 class="pm-title">商品管理</h1>
+            <p class="pm-sub">支援搜尋篩選、批次上下架、快速編輯與多圖上傳。</p>
+        </div>
+        <div class="pm-tabs">
+            <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
+            <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
+        </div>
+    </div>
+
+    <!-- 引入商品列表 -->
+    <?php require __DIR__ . '/products/list.php'; ?>
+
+    <!-- 引入新增商品 -->
+    <?php require __DIR__ . '/products/create.php'; ?>
+</div>
+
+<script src="../js/products.js"></script>
