@@ -131,9 +131,18 @@ function buildFilterQuery(array $overrides = []) {
         'featured_filter' => isset($_GET['featured_filter']) ? $_GET['featured_filter'] : '',
         'p' => isset($_GET['p']) ? $_GET['p'] : 1,
     ];
+
+    // 💡 新增：如果切換分頁或點擊篩選時，自動清除編輯模式的參數，防止卡在編輯頁面
+    if (isset($_GET['action']) && $_GET['action'] === 'edit') {
+        unset($base['action'], $base['id']);
+    }
+
     $merged = array_merge($base, $overrides);
     return 'backend.php?' . http_build_query($merged);
 }
+
+// 💡 核心邏輯：判斷目前是不是編輯模式 (網址包含 action=edit 且有商品 ID)
+$isEditMode = (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id']) && intval($_GET['id']) > 0);
 
 ?>
 <link rel="stylesheet" href="../css/products.css">
@@ -145,16 +154,26 @@ function buildFilterQuery(array $overrides = []) {
             <p class="pm-sub">支援搜尋篩選、批次上下架、快速編輯與多圖上傳。</p>
         </div>
         <div class="pm-tabs">
-            <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
-            <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
+            <?php if ($isEditMode): ?>
+                <a href="backend.php?page=products" class="pm-tab active" style="text-decoration: none;">⬅️ 返回商品列表</a>
+            <?php else: ?>
+                <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
+                <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
+            <?php endif; ?>
         </div>
     </div>
 
-    <!-- 引入商品列表 -->
-    <?php require __DIR__ . '/products/list.php'; ?>
-
-    <!-- 引入新增商品 -->
-    <?php require __DIR__ . '/products/create.php'; ?>
+    <?php 
+    // 💡 智慧切換頁面內容
+    if ($isEditMode) {
+        // 進入編輯模式：載入剛剛新增的 edit_product.php
+        require __DIR__ . '/products/edit_product.php'; 
+    } else {
+        // 正常模式：載入原本的列表與新增區塊
+        require __DIR__ . '/products/list.php'; 
+        require __DIR__ . '/products/create.php'; 
+    }
+    ?>
 </div>
 
-<script src="../js/products.js"></script>
+<script src="../js/products.js?v=<?php echo time(); ?>"></script>

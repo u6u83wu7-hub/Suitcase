@@ -18,7 +18,7 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'products';
 
 // White-list allowed pages to avoid path traversal
 $allowed = [
-    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile'
+    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile', 'edit_product'
 ];
 if (!in_array($page, $allowed)) {
     $page = 'products';

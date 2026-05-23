@@ -10,7 +10,19 @@ if ($name === '') {
     goProducts('請輸入商品名稱');
 }
 
-$categoryId = (isset($_POST['category_id']) && $_POST['category_id'] !== '') ? intval($_POST['category_id']) : null;
+// 處理分類（檢查是否為動態新增）
+$categoryId = null;
+if (isset($_POST['category_id']) && $_POST['category_id'] === 'new' && !empty($_POST['new_category_name'])) {
+    $newCatName = trim($_POST['new_category_name']);
+    $stmtCat = $conn->prepare("INSERT INTO categories (name) VALUES (?)");
+    $stmtCat->bind_param("s", $newCatName);
+    if ($stmtCat->execute()) {
+        $categoryId = $conn->insert_id;
+    }
+} elseif (!empty($_POST['category_id'])) {
+    $categoryId = intval($_POST['category_id']);
+}
+
 $isFeatured = boolPost('is_featured') ? 1 : 0;
 $description = isset($_POST['description']) ? trim($_POST['description']) : '';
 $warrantyInfo = isset($_POST['warranty_info']) ? trim($_POST['warranty_info']) : '';
@@ -24,7 +36,7 @@ if (empty($_FILES['product_images']['name'][0])) {
     goProducts('請至少上傳一張圖片');
 }
 
-$uploadDir = __DIR__ . '/../img/products/';
+$uploadDir = __DIR__ . '/../../img/products/';
 if (!is_dir($uploadDir) && !mkdir($uploadDir, 0777, true)) {
     goProducts('建立圖片資料夾失敗');
 }
@@ -32,6 +44,7 @@ if (!is_dir($uploadDir) && !mkdir($uploadDir, 0777, true)) {
 $conn->begin_transaction();
 
 try {
+    // 寫入商品主檔
     $insertCols = ['primary_category_id', 'name', 'slug', 'is_featured', 'status'];
     $insertVals = [$categoryId, $name, $slug, $isFeatured, 'ON SHELF'];
     $bindTypes = 'issis';
@@ -56,7 +69,9 @@ try {
     }
     $productId = $conn->insert_id;
 
-    $sizes = isset($_POST['size']) && is_array($_POST['size']) ? $_POST['size'] : [];
+    // 處理 SKU
+    // 👇 這裡已經幫你改成 $_POST['size_inches']
+    $sizes = isset($_POST['size_inches']) && is_array($_POST['size_inches']) ? $_POST['size_inches'] : [];
     $colors = isset($_POST['color']) && is_array($_POST['color']) ? $_POST['color'] : [];
     $prices = $_POST['price'];
     $stocks = $_POST['stock'];
@@ -77,11 +92,13 @@ try {
         $vTypes = 'isdi';
         $vVals = [$productId, $skuCode, $price, $stock];
 
-        if (in_array('size', $variantColumns, true)) {
-            $vCols[] = 'size';
+        // 👇 這裡已經幫你改成 size_inches
+        if (in_array('size_inches', $variantColumns, true)) {
+            $vCols[] = 'size_inches';
             $vTypes .= 's';
             $vVals[] = $size;
         }
+        // 將顏色寫入資料庫
         if (in_array('color', $variantColumns, true)) {
             $vCols[] = 'color';
             $vTypes .= 's';
@@ -102,6 +119,10 @@ try {
         throw new Exception('至少要有一組有效 SKU');
     }
 
+    // 處理圖片上傳與顏色綁定
+    $mainImageIdx = isset($_POST['main_image_idx']) ? intval($_POST['main_image_idx']) : 0;
+    $imageColors = isset($_POST['image_color_idx']) ? $_POST['image_color_idx'] : [];
+
     foreach ($_FILES['product_images']['tmp_name'] as $idx => $tmpName) {
         if ($_FILES['product_images']['error'][$idx] !== 0) {
             throw new Exception('圖片上傳失敗');
@@ -121,16 +142,27 @@ try {
         }
 
         $imageUrl = 'img/products/' . $filename;
-        $isMain = ($idx === 0) ? 1 : 0;
+        // 依照前端選擇的 Index 設定主圖
+        $isMain = ($idx === $mainImageIdx) ? 1 : 0; 
         $displayOrder = $idx;
+        // 抓取綁定的顏色
+        $imgColor = (isset($imageColors[$idx]) && $imageColors[$idx] !== '') ? trim($imageColors[$idx]) : null;
 
         $iCols = ['product_id', 'image_url', 'is_main'];
         $iTypes = 'isi';
         $iVals = [$productId, $imageUrl, $isMain];
+        
         if (in_array('display_order', $imageColumns, true)) {
             $iCols[] = 'display_order';
             $iTypes .= 'i';
             $iVals[] = $displayOrder;
+        }
+        
+        // 將圖片綁定顏色寫入資料庫
+        if (in_array('color', $imageColumns, true) && $imgColor !== null) {
+            $iCols[] = 'color';
+            $iTypes .= 's';
+            $iVals[] = $imgColor;
         }
 
         $iColSql = implode(', ', $iCols);

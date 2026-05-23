@@ -55,6 +55,7 @@ $imageColumns = tableColumns($conn, 'product_images');
 // 路由表：action => 处理文件
 $actions = [
     'add_product' => 'actions/AddProduct.php',
+    'update_product' => 'actions/UpdateProduct.php',
     'toggle_product_status' => 'actions/ToggleProductStatus.php',
     'toggle_featured' => 'actions/ToggleFeatured.php',
     'bulk_update_products' => 'actions/BulkUpdateProducts.php',
@@ -67,7 +68,7 @@ if (isset($actions[$action])) {
     if (file_exists($actionFile)) {
         require $actionFile;
     } else {
-        goProducts('操作处理器不存在');
+        goProducts('操作處理器不存在');
     }
 } else {
     goProducts('未知操作');
