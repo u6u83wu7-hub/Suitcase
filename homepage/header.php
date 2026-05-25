@@ -10,6 +10,23 @@ if (!isset($pageTitle)) {
 if (!isset($activeNav)) {
     $activeNav = '';
 }
+
+$cartCount = 0;
+if (isset($_SESSION['user_id']) && isset($conn) && $conn instanceof mysqli) {
+    $cartUserId = (int)$_SESSION['user_id'];
+    $cartStmt = $conn->prepare("
+        SELECT COALESCE(SUM(ci.quantity), 0) AS item_count
+        FROM carts c
+        LEFT JOIN cart_items ci ON ci.cart_id = c.cart_id
+        WHERE c.user_id = ?
+    ");
+    if ($cartStmt) {
+        $cartStmt->bind_param("i", $cartUserId);
+        $cartStmt->execute();
+        $cartRow = $cartStmt->get_result()->fetch_assoc();
+        $cartCount = (int)($cartRow['item_count'] ?? 0);
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -130,7 +147,7 @@ if (!isset($activeNav)) {
                     <a href="login.php" class="icon-btn" title="登入">👤</a>
                 <?php endif; ?>
 
-                <div class="icon-btn" title="購物車">🛒<span class="cart-badge">0</span></div>
+                <a href="cart.php" class="icon-btn" title="Cart">🛒<span class="cart-badge"><?php echo $cartCount; ?></span></a>
             </div>
         </div>
 

@@ -113,7 +113,63 @@ $sql_users = "CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_users);
 
-echo "<p style='color:blue;'>📋 基本 7 張資料表結構已確認/建立完成。</p>";
+$sql_carts = "CREATE TABLE IF NOT EXISTS `carts` (
+    `cart_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL UNIQUE,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_carts_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_carts);
+
+$sql_cart_items = "CREATE TABLE IF NOT EXISTS `cart_items` (
+    `cart_item_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `cart_id` INT NOT NULL,
+    `variant_id` INT NOT NULL,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `is_selected` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_cart_variant` (`cart_id`, `variant_id`),
+    INDEX `idx_cart_items_cart_id` (`cart_id`),
+    INDEX `idx_cart_items_variant_id` (`variant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_cart_items);
+
+$sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
+    `order_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `subtotal_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `shipping_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `status` VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    `recipient_name` VARCHAR(100) NOT NULL,
+    `recipient_phone` VARCHAR(50) NOT NULL,
+    `shipping_address` TEXT NOT NULL,
+    `shipping_notes` VARCHAR(255) NULL,
+    `payment_method` VARCHAR(50) NOT NULL DEFAULT 'COD',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_orders_user_id` (`user_id`),
+    INDEX `idx_orders_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_orders);
+
+$sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
+    `order_item_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_id` INT NOT NULL,
+    `variant_id` INT NOT NULL,
+    `product_name` VARCHAR(255) NOT NULL,
+    `sku_code` VARCHAR(50) NOT NULL,
+    `color` VARCHAR(50) NULL,
+    `size_inches` VARCHAR(50) NULL,
+    `quantity` INT NOT NULL,
+    `locked_price` DECIMAL(10,2) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_order_items_order_id` (`order_id`),
+    INDEX `idx_order_items_variant_id` (`variant_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_order_items);
+
+echo "<p style='color:blue;'>📋 基本 11 張資料表結構已確認/建立完成。</p>";
 
 // === 延伸欄位同步檢查 ===
 
@@ -122,6 +178,20 @@ if (!columnExists($conn, 'product_images', 'color')) {
     $sql = "ALTER TABLE `product_images` ADD COLUMN `color` VARCHAR(50) NULL AFTER `is_main`";
     if ($conn->query($sql)) {
         echo "<p style='color:green;'>✅ 同步成功：已在 `product_images` 追加 `color` (顏色配圖功能) 欄位</p>";
+    }
+}
+
+if (!columnExists($conn, 'products', 'description')) {
+    $sql = "ALTER TABLE `products` ADD COLUMN `description` TEXT NULL AFTER `name`";
+    if ($conn->query($sql)) {
+        echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `description` 欄位</p>";
+    }
+}
+
+if (!columnExists($conn, 'products', 'warranty_info')) {
+    $sql = "ALTER TABLE `products` ADD COLUMN `warranty_info` TEXT NULL AFTER `description`";
+    if ($conn->query($sql)) {
+        echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `warranty_info` 欄位</p>";
     }
 }
 

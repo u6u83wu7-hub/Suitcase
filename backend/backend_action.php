@@ -60,6 +60,7 @@ $actions = [
     'toggle_featured' => 'actions/ToggleFeatured.php',
     'bulk_update_products' => 'actions/BulkUpdateProducts.php',
     'delete_product' => 'actions/DeleteProduct.php',
+    'update_order_status' => 'actions/UpdateOrderStatus.php',
 ];
 
 // 分发请求
