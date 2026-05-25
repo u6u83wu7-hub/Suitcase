@@ -48,6 +48,7 @@ $order = $stmt->get_result()->fetch_assoc();
                 <div><dt>Created</dt><dd><?php echo htmlspecialchars($order['created_at']); ?></dd></div>
             </dl>
             <div class="success-actions">
+                <a href="order_detail.php?order_id=<?php echo intval($order['order_id']); ?>" class="success-btn">View order detail</a>
                 <a href="new_in.php" class="success-btn">Continue shopping</a>
                 <a href="index.php" class="success-link">Back home</a>
             </div>

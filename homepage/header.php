@@ -139,6 +139,7 @@ if (isset($_SESSION['user_id']) && isset($conn) && $conn instanceof mysqli) {
                             <div style="padding: 10px 15px; border-bottom: 1px solid #eee; text-align: center; color: #db6b6b; font-weight: bold; font-size: 14px;">
                                 Hi, <?php echo htmlspecialchars($_SESSION['user_name']); ?>
                             </div>
+                            <a href="my_orders.php">我的訂單</a>
                             <a href="profile.php">會員資料</a>
                             <a href="logout.php">登出</a>
                         </div>
