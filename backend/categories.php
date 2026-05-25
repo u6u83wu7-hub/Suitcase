@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // Category management placeholder
 ?>
 <h1>🏷️ 分類管理</h1>

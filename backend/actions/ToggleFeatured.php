@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/ToggleFeatured.php - 切换商品精选状态
 
 if ($action !== 'toggle_featured') {

@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // products/create.php - 新增商品表單（純展示層）
 // 所有數據已由 products.php 準備好：$categories
 ?>

@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // products/list.php - 商品列表頁面（純展示層）
 // 所有數據已由 products.php 準備好：
 // - $conn, $productResult, $categories, $totalProducts, $totalPages

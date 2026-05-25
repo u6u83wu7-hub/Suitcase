@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // products/edit_product.php - 編輯商品頁面（置於子資料夾內）
 
 $product_id = isset($_GET['id']) ? intval($_GET['id']) : 0;

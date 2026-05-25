@@ -11,35 +11,50 @@ $error = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
+    if ($conn->connect_error) {
+        die("資料庫連線失敗: " . $conn->connect_error);
+    }
+    $conn->set_charset("utf8mb4");
     
-    $username = $_POST['username'];
+    $username = trim($_POST['username']);
     $password = $_POST['password'];
 
-    // 1. 查詢該管理員帳號
-    $stmt = $conn->prepare("SELECT admin_id, role_id, password_hash, status FROM admin_users WHERE username = ?");
-    $stmt->bind_param("s", $username);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    // 🛡️ 嚴格防護 A：限制長度，防止塞爆伺服器
+    if (strlen($username) > 50 || strlen($password) > 255) {
+        $error = "❌ 輸入長度異常，請勿惡意測試！";
+    }
+    // 🛡️ 嚴格防護 B：白名單驗證 (只允許英文、數字、底線)
+    elseif (!preg_match('/^[a-zA-Z0-9_]+$/', $username)) {
+        $error = "❌ 帳號格式錯誤，僅允許英數字！";
+    }
+    else {
+        // 1. 查詢該管理員帳號 (防 SQL 注入的預備語句)
+        $stmt = $conn->prepare("SELECT admin_id, role_id, password_hash, status FROM admin_users WHERE username = ?");
+        $stmt->bind_param("s", $username);
+        $stmt->execute();
+        $result = $stmt->get_result();
 
-    if ($user = $result->fetch_assoc()) {
-        // 2. 檢查帳號是否為 ACTIVE 狀態
-        if ($user['status'] !== 'ACTIVE') {
-            $error = "❌ 該帳號已被停用，請聯絡系統負責人。";
-        } 
-        // 3. 🌟 關鍵：比對明文密碼與資料庫密文
-        else if (password_verify($password, $user['password_hash'])) {
-            // 登入成功！發放通行證 (Session)
-            $_SESSION['admin_id'] = $user['admin_id'];
-            $_SESSION['admin_username'] = $username;
-            $_SESSION['role_id'] = $user['role_id'];
+        if ($user = $result->fetch_assoc()) {
+            // 2. 檢查帳號是否為 ACTIVE 狀態
+            if ($user['status'] !== 'ACTIVE') {
+                $error = "❌ 該帳號已被停用，請聯絡系統負責人。";
+            } 
+            // 3. 🌟 關鍵：比對明文密碼與資料庫密文
+            else if (password_verify($password, $user['password_hash'])) {
+                // 登入成功！發放通行證 (Session)
+                $_SESSION['admin_id'] = $user['admin_id'];
+                $_SESSION['admin_username'] = $username;
+                $_SESSION['role_id'] = $user['role_id'];
 
-            header("Location: backend.php");
-            exit();
+                header("Location: backend.php");
+                exit();
+            } else {
+                $error = "❌ 密碼錯誤！";
+            }
         } else {
-            $error = "❌ 密碼錯誤！";
+            $error = "❌ 找不到該管理員帳號！";
         }
-    } else {
-        $error = "❌ 找不到該管理員帳號！";
+        $stmt->close();
     }
     $conn->close();
 }

@@ -2,12 +2,7 @@
 // backend_action.php - 统一路由器
 // 分發請求到各个 action 處理器
 
-session_start();
-
-// 管理員驗證
-if (!isset($_SESSION['admin_id'])) {
-    die("Access Denied");
-}
+require_once __DIR__ . '/auth_guard.php';
 
 // 資料庫連線
 $conn = new mysqli("localhost", "root", "", "all_pass_db");

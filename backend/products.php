@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // products.php - 商品管理主頁面（容器）
 // $conn 由 backend.php 提供
 

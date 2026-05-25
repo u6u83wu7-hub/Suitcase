@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/UpdateProduct.php - 更新商品
 
 if ($action !== 'update_product') {

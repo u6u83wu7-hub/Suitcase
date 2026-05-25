@@ -123,6 +123,7 @@ if (!isset($activeNav)) {
                                 Hi, <?php echo htmlspecialchars($_SESSION['user_name']); ?>
                             </div>
                             <a href="profile.php">會員資料</a>
+                            <a href="change_password.php">修改密碼</a>
                             <a href="logout.php">登出</a>
                         </div>
                     </div>

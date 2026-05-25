@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/AddProduct.php - 添加新商品
 
 if ($action !== 'add_product') {
