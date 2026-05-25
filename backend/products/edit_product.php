@@ -54,16 +54,19 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                     <label>商品名稱 <span style="color:#ef4444;">*</span></label>
                     <input class="pm-input" type="text" name="name" required value="<?= htmlspecialchars($product['name']) ?>">
                 </div>
+                
                 <div class="pm-col-3">
                     <label>分類</label>
-                    <select class="pm-select" name="category_id">
+                    <select class="pm-select" name="category_id" id="category_select" onchange="toggleNewCategory(this)">
                         <option value="">不分類</option>
                         <?php foreach ($categories as $cat): ?>
                             <option value="<?= $cat['category_id'] ?>" <?= $cat['category_id'] == $product['primary_category_id'] ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($cat['name']) ?>
                             </option>
                         <?php endforeach; ?>
+                        <option value="new" style="color:#2563eb; font-weight:bold;">+ 新增分類</option>
                     </select>
+                    <input type="text" class="pm-input" name="new_category_name" id="new_category_name" style="display:none; margin-top:8px;" placeholder="輸入新分類名稱">
                 </div>
                 <div class="pm-col-3" style="display:flex; align-items:center; padding-bottom:8px;">
                     <label style="margin:0; cursor:pointer; display:flex; align-items:center; gap:6px;">
@@ -161,6 +164,19 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
 </section>
 
 <script>
+// 👇 修改點 2：加入分類切換的 JS 邏輯
+function toggleNewCategory(select) {
+    const newCatInput = document.getElementById('new_category_name');
+    if(select.value === 'new') {
+        newCatInput.style.display = 'block';
+        newCatInput.required = true;
+    } else {
+        newCatInput.style.display = 'none';
+        newCatInput.required = false;
+        newCatInput.value = '';
+    }
+}
+
 // 針對現有圖片與新圖片的連動顏色下拉選單處理腳本
 (function() {
     function getAvailableColors() {
@@ -204,3 +220,4 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
         });
     }
 })();
+</script>

@@ -15,8 +15,16 @@ if ($name === '') {
     goProducts('請輸入商品名稱');
 }
 
+// 👇 修改點 1：支援動態新增分類
 $categoryId = null;
-if (isset($_POST['category_id']) && $_POST['category_id'] !== '') {
+if (isset($_POST['category_id']) && $_POST['category_id'] === 'new' && !empty($_POST['new_category_name'])) {
+    $newCatName = trim($_POST['new_category_name']);
+    $stmtCat = $conn->prepare("INSERT INTO categories (name) VALUES (?)");
+    $stmtCat->bind_param("s", $newCatName);
+    if ($stmtCat->execute()) {
+        $categoryId = $conn->insert_id;
+    }
+} elseif (!empty($_POST['category_id'])) {
     $categoryId = intval($_POST['category_id']);
 }
 
@@ -143,7 +151,7 @@ try {
         $conn->query("DELETE FROM product_variants WHERE product_id = {$productId}");
     }
 
-    // 更新既有圖片顏色
+    // 👇 修改點 2：更新既有圖片顏色 (修復空值存入變成 0 的問題)
     if (in_array('color', $imageColumns, true) && isset($_POST['existing_image_color']) && is_array($_POST['existing_image_color'])) {
         foreach ($_POST['existing_image_color'] as $imgId => $colorVal) {
             $imgId = intval($imgId);
@@ -151,6 +159,11 @@ try {
                 continue;
             }
             $colorVal = trim($colorVal);
+            // 如果沒選顏色，強制轉為 NULL 存入，避免資料庫誤存為 '0'
+            if ($colorVal === '') {
+                $colorVal = null;
+            }
+            
             $stmtColor = $conn->prepare('UPDATE product_images SET color = ? WHERE image_id = ? AND product_id = ?');
             $stmtColor->bind_param('sii', $colorVal, $imgId, $productId);
             $stmtColor->execute();
@@ -276,3 +289,4 @@ try {
     $conn->rollback();
     goProducts('錯誤: ' . $e->getMessage());
 }
+?>
