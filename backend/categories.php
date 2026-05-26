@@ -1,6 +1,5 @@
 <?php
 require_once __DIR__ . '/auth_guard.php';
-require_once __DIR__ . '/db_connect.php';
 
 // 1. 取得分類列表與數量
 $categories = [];
