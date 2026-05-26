@@ -5,30 +5,44 @@ $error_message = "";
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     if ($conn->connect_error) die("資料庫連線失敗: " . $conn->connect_error);
+    $conn->set_charset("utf8mb4");
 
-    $email = $_POST['email'];
+    $email = trim($_POST['email']);
     $password = $_POST['password'];
 
-    // 只去一般消費者的 users 表格找
-    $sql = "SELECT * FROM users WHERE email = '$email'";
-    $result = $conn->query($sql);
+    // 🛡️ 嚴格防護 A：限制長度，防止塞爆伺服器
+    if (strlen($email) > 100 || strlen($password) > 255) {
+        $error_message = "輸入長度異常，請停止你的駭客行為！";
+    } 
+    // 🛡️ 嚴格防護 B：驗證 Email 格式是否真的長得像 Email
+    elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error_message = "請輸入正確的電子郵件格式！";
+    } 
+    else {
+        // 只去一般消費者的 users 表格找 (防 SQL 注入的預備語句)
+        $stmt = $conn->prepare("SELECT user_id, name, password_hash FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $result = $stmt->get_result();
 
-    if ($result->num_rows > 0) {
-        $row = $result->fetch_assoc();
-        
-        if (password_verify($password, $row['password_hash'])) {
-            // 登入成功！存入 Session
-            $_SESSION['user_id'] = $row['user_id'];
-            $_SESSION['user_name'] = $row['name'];
+        if ($result->num_rows > 0) {
+            $row = $result->fetch_assoc();
             
-            // 直接導向客人專屬的首頁
-            header("Location: index.php"); 
-            exit();
+            if (password_verify($password, $row['password_hash'])) {
+                // 登入成功！存入 Session
+                $_SESSION['user_id'] = $row['user_id'];
+                $_SESSION['user_name'] = $row['name'];
+                
+                // 直接導向客人專屬的首頁
+                header("Location: index.php"); 
+                exit();
+            } else {
+                $error_message = "密碼錯誤，請再試一次！";
+            }
         } else {
-            $error_message = "密碼錯誤，請再試一次！";
+            $error_message = "找不到此帳號，請先前往註冊！";
         }
-    } else {
-        $error_message = "找不到此帳號，請先前往註冊！";
+        $stmt->close();
     }
     $conn->close();
 }

@@ -1,0 +1,91 @@
+CREATE DATABASE all_pass_db;
+USE all_pass_db;
+-----------------------------表格建立區---------------------------------
+1.用戶表 數字部分都不用複製
+CREATE TABLE users (
+    user_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255),
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(50),
+    sso_provider VARCHAR(50),
+    sso_id VARCHAR(255) UNIQUE,
+    membership_level INT NOT NULL DEFAULT 1,
+    points_balance INT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+2.
+CREATE TABLE categories (
+    category_id INT AUTO_INCREMENT PRIMARY KEY,
+    parent_id INT NULL,
+    name VARCHAR(100) NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES categories(category_id)
+);
+3.
+CREATE TABLE suppliers (
+    supplier_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    contact_person VARCHAR(100) NULL,
+    phone VARCHAR(50) NULL,
+    email VARCHAR(255) NULL
+);
+4.
+CREATE TABLE products (
+    product_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    primary_category_id INT NOT NULL,
+    supplier_id INT NULL,
+    slug VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    meta_title VARCHAR(255) NULL,
+    meta_description TEXT NULL,
+    days_applicable VARCHAR(50) NULL,
+    warranty_months INT DEFAULT 12,
+    status VARCHAR(20) DEFAULT 'ON SHELF',
+    publish_at TIMESTAMP NULL,
+    offline_at TIMESTAMP NULL,
+    is_featured TINYINT(1) DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (primary_category_id) REFERENCES categories(category_id),
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id)
+);
+5.
+CREATE TABLE product_variants (
+    variant_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    product_id BIGINT NOT NULL,
+    sku_code VARCHAR(100) NOT NULL UNIQUE,
+    color VARCHAR(50) NULL,
+    size_inches INT NULL,
+    capacity_liters INT NULL,
+    price DECIMAL(10,2) NOT NULL,
+    stock_available INT DEFAULT 0,
+    stock_reserved INT DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE
+);
+6.
+CREATE TABLE product_images (
+    image_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    product_id BIGINT NOT NULL,
+    image_url VARCHAR(500) NOT NULL,
+    is_main BOOLEAN DEFAULT FALSE,
+    sort_order INT DEFAULT 0,
+    alt_text VARCHAR(255) NULL,
+    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE
+);
+7.
+CREATE TABLE admin_users (
+    admin_id INT AUTO_INCREMENT PRIMARY KEY,
+    role_id INT NOT NULL,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+-----------------------------表格修改區---------------------------------
+ex :
+1.
+1(表格編號) 新增屬性 說明:用戶登入方式
+指令:
+ALTER TABLE users 
+ADD COLUMN auth_type VARCHAR(20) DEFAULT 'LOCAL' AFTER sso_id;
+5/12 李能宣

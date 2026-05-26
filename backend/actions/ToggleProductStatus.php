@@ -1,5 +1,6 @@
 <?php
-// actions/ToggleProductStatus.php - 切换商品上下架狀態
+require_once __DIR__ . '/../auth_guard.php';
+// actions/ToggleProductStatus.php - 切換商品上下架狀態
 
 if ($action !== 'toggle_product_status') {
     return;
@@ -13,6 +14,9 @@ if ($productId <= 0 || !in_array($newStatus, ['ON SHELF', 'OFF SHELF'], true)) {
 }
 
 $stmt = $conn->prepare("UPDATE products SET status = ? WHERE product_id = ?");
+if (!$stmt) {
+    goProducts('資料庫錯誤: ' . $conn->error);
+}
 $stmt->bind_param("si", $newStatus, $productId);
 
 if ($stmt->execute()) {

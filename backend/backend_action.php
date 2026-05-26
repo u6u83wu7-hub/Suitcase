@@ -1,199 +1,99 @@
 <?php
-session_start();
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
-// 管理員驗證
-if (!isset($_SESSION['admin_id'])) {
-    die("Access Denied");
-}
+require_once __DIR__ . '/auth_guard.php';
 
-// 資料庫連線
+
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
-
 if ($conn->connect_error) {
-    die("資料庫連線失敗：" . $conn->connect_error);
+    die("資料庫連線失敗: " . $conn->connect_error);
 }
-
 $conn->set_charset("utf8mb4");
 
-// 表單送出
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
+$admin_username = isset($_SESSION['admin_username']) ? $_SESSION['admin_username'] : '管理者';
 
-    $name = trim($_POST['name']);
-    $price = floatval($_POST['price']);
-    $stock = intval($_POST['stock']);
+$page = isset($_GET['page']) ? $_GET['page'] : 'products';
 
-    $is_featured = isset($_POST['is_featured']) ? 1 : 0;
-
-    $category_id = !empty($_POST['category_id'])
-        ? intval($_POST['category_id'])
-        : null;
-
-    // slug
-    $slug = strtolower(str_replace(' ', '-', $name)) . "-" . time();
-
-    // 圖片資料夾
-    $upload_dir = __DIR__ . "/../img/products/";
-
-    // 若資料夾不存在就建立
-    if (!is_dir($upload_dir)) {
-        mkdir($upload_dir, 0777, true);
-    }
-
-    // 檢查是否有圖片
-    if (empty($_FILES['product_images']['name'][0])) {
-        die("請至少上傳一張圖片");
-    }
-
-    // 啟動交易
-    $conn->begin_transaction();
-
-    try {
-
-        // =========================
-        // products
-        // =========================
-        $stmt1 = $conn->prepare("
-            INSERT INTO products
-            (
-                primary_category_id,
-                name,
-                slug,
-                is_featured,
-                status
-            )
-            VALUES (?, ?, ?, ?, 'ON SHELF')
-        ");
-
-        $stmt1->bind_param(
-            "issi",
-            $category_id,
-            $name,
-            $slug,
-            $is_featured
-        );
-
-        if (!$stmt1->execute()) {
-            throw new Exception("products 新增失敗");
-        }
-
-        $product_id = $conn->insert_id;
-
-        // =========================
-        // variants
-        // =========================
-        $sku_code = "AL-" . strtoupper(uniqid());
-
-        $stmt2 = $conn->prepare("
-            INSERT INTO product_variants
-            (
-                product_id,
-                sku_code,
-                price,
-                stock_available
-            )
-            VALUES (?, ?, ?, ?)
-        ");
-
-        $stmt2->bind_param(
-            "isdi",
-            $product_id,
-            $sku_code,
-            $price,
-            $stock
-        );
-
-        if (!$stmt2->execute()) {
-            throw new Exception("variant 新增失敗");
-        }
-
-        // =========================
-        // images
-        // =========================
-        foreach ($_FILES['product_images']['tmp_name'] as $key => $tmp_name) {
-
-            if ($_FILES['product_images']['error'][$key] != 0) {
-                throw new Exception("圖片上傳錯誤");
-            }
-
-            $original_name =
-                $_FILES['product_images']['name'][$key];
-
-            $file_ext = strtolower(
-                pathinfo($original_name, PATHINFO_EXTENSION)
-            );
-
-            // 允許格式
-            $allow = ['jpg', 'jpeg', 'png', 'webp'];
-
-            if (!in_array($file_ext, $allow)) {
-                throw new Exception("不支援的圖片格式");
-            }
-
-            // 新檔名
-            $new_filename =
-                $product_id . "_" .
-                $key . "_" .
-                time() . "." .
-                $file_ext;
-
-            $target_path = $upload_dir . $new_filename;
-
-$db_image_path = "img/products/" . $new_filename;
-
-            // 搬移圖片
-            if (!move_uploaded_file($tmp_name, $target_path)) {
-
-                echo "<pre>";
-                print_r($_FILES);
-                echo "</pre>";
-
-                die("目標路徑：" . $target_path);
-            }
-
-            // 第一張主圖
-            $is_main = ($key == 0) ? 1 : 0;
-
-            // 寫入 product_images
-            $stmt3 = $conn->prepare("
-                INSERT INTO product_images
-                (
-                    product_id,
-                    image_url,
-                    is_main
-                )
-                VALUES (?, ?, ?)
-            ");
-
-            $stmt3->bind_param(
-                "isi",
-                $product_id,
-                $db_image_path,
-                $is_main
-            );
-
-            if (!$stmt3->execute()) {
-                throw new Exception("圖片資料寫入失敗");
-            }
-        }
-
-        // 成功
-        $conn->commit();
-
-        echo "
-        <script>
-            alert('商品新增成功');
-            location.href='backend.php';
-        </script>
-        ";
-
-    } catch (Exception $e) {
-
-        // rollback
-        $conn->rollback();
-
-        echo "錯誤：" . $e->getMessage();
-    }
+// White-list allowed pages to avoid path traversal
+$allowed = [
+    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile', 'edit_product'
+];
+if (!in_array($page, $allowed)) {
+    $page = 'products';
 }
-
-$conn->close();
 ?>
+
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>All Pass 管理後台</title>
+    <style>
+        body { margin: 0; font-family: Arial, 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #f5f5f5; }
+        .app { display: flex; min-height: 100vh; }
+        .sidebar { width: 260px; background: #1a1a1a; color: #fff; padding: 24px; box-shadow: 2px 0 8px rgba(0,0,0,0.08); flex-shrink: 0;}
+        .brand { font-size: 18px; font-weight: 800; color: #db6b6b; margin-bottom: 18px; }
+        .admin-box { background: rgba(255,255,255,0.04); padding: 12px; border-radius: 8px; margin-bottom: 18px; }
+        .admin-box .name { font-weight: 700; }
+        .menu { margin-top: 10px; padding: 0; }
+        .menu li { list-style: none; margin: 8px 0; }
+        .menu a { color: #ddd; text-decoration: none; display: block; padding: 10px 12px; border-radius: 6px; }
+        .menu a:hover, .menu a.active { background: rgba(219,107,107,0.12); color: #fff; }
+
+        .main { flex: 1; padding: 28px; min-width: 0;}
+        .card { background: #fff; padding: 22px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.04); }
+        h1 { margin-top: 0; font-size: 20px; }
+        .muted { color: #666; font-size: 14px; }
+
+        /* simple form styles reused */
+        input, select { width:100%; padding:10px; margin-top:8px; margin-bottom:14px; box-sizing:border-box; }
+        button { padding:12px 16px; border:none; background:#2c3e50; color:#fff; border-radius:6px; cursor:pointer; }
+        button.alt { background:#db6b6b; }
+    </style>
+</head>
+<body>
+
+<div class="app">
+    <aside class="sidebar">
+        <div class="brand">All Pass 管理系統</div>
+        <div class="admin-box">
+            <div class="name">您好，<?php echo htmlspecialchars($admin_username); ?></div>
+            <div class="muted" style="margin-top:6px;">管理者介面</div>
+            <div style="margin-top:10px;">
+                <a href="admin_logout.php" style="color:#fff; font-size:13px;">登出</a>
+            </div>
+        </div>
+
+        <ul class="menu">
+            <li><a href="backend.php?page=dashboard" class="<?php echo $page=='dashboard' ? 'active' : ''; ?>">📊 營運儀表板</a></li>
+            <li><a href="backend.php?page=products" class="<?php echo $page=='products' ? 'active' : ''; ?>">📦 商品管理</a></li>
+            <li><a href="backend.php?page=categories" class="<?php echo $page=='categories' ? 'active' : ''; ?>">🏷️ 分類管理</a></li>
+            <li><a href="backend.php?page=orders" class="<?php echo $page=='orders' ? 'active' : ''; ?>">🧾 訂單管理</a></li>
+            <li><a href="backend.php?page=members" class="<?php echo $page=='members' ? 'active' : ''; ?>">👥 會員與客服管理</a></li>
+            <li><a href="backend.php?page=marketing" class="<?php echo $page=='marketing' ? 'active' : ''; ?>">📢 行銷與內容管理</a></li>
+            <li><a href="backend.php?page=system" class="<?php echo $page=='system' ? 'active' : ''; ?>">⚙️ 系統與權限管理</a></li>
+            <li style="margin-top:12px;"><a href="backend.php?page=profile" class="<?php echo $page=='profile' ? 'active' : ''; ?>">🔐 管理者資料</a></li>
+        </ul>
+    </aside>
+
+    <main class="main">
+        <div class="card">
+            <?php
+            // include the page content from separate files inside the backend folder
+            $include_file = __DIR__ . '/' . $page . '.php';
+            if (file_exists($include_file)) {
+                include $include_file;
+            } else {
+                echo '<h1>找不到頁面</h1><p class="muted">請確認您要訪問的頁面是否存在。</p>';
+            }
+            ?>
+        </div>
+    </main>
+</div>
+
+<?php $conn->close(); ?>
+
+</body>
+</html>
