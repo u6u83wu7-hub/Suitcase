@@ -1,4 +1,8 @@
 <?php
+// Temporary: show PHP errors to help debug why page output is missing
+ini_set('display_errors', '1');
+ini_set('display_startup_errors', '1');
+error_reporting(E_ALL);
 $pageTitle = 'NEW IN 新品 | All Pass 行李箱專賣';
 $activeNav = 'new_in';
 
@@ -23,22 +27,36 @@ include 'header.php';
 
         <div class="product-grid">
             <?php
-            $sql = "SELECT 
-                        p.product_id, 
-                        p.name, 
-                        v.price, 
-                        i.image_url 
+            $sql = "SELECT
+                        p.product_id,
+                        p.name,
+                        MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                        (
+                            SELECT pi.image_url
+                            FROM product_images pi
+                            WHERE pi.product_id = p.product_id
+                            ORDER BY pi.is_main DESC, pi.sort_order ASC
+                            LIMIT 1
+                        ) AS image_url
                     FROM products p
-                    INNER JOIN product_variants v 
-                        ON p.product_id = v.product_id
-                    INNER JOIN product_images i 
-                        ON p.product_id = i.product_id
-                    WHERE i.is_main = 1 
-                      AND p.status = 'ON SHELF'
+                    LEFT JOIN product_variants v ON v.product_id = p.product_id
+                    WHERE p.status = 'ON SHELF'
+                    GROUP BY p.product_id
                     ORDER BY p.created_at DESC
                     LIMIT 12";
 
             $result = $conn->query($sql);
+
+            // Debug log: record SQL and any mysqli error (avoid complex sampling)
+            $debugLog = __DIR__ . '/../backend/logs/new_in_debug.log';
+            @mkdir(dirname($debugLog), 0777, true);
+            $dbg = [
+                'time' => date('Y-m-d H:i:s'),
+                'sql' => $sql,
+                'mysqli_error' => $conn->error,
+                'num_rows' => ($result ? $result->num_rows : 0),
+            ];
+            @file_put_contents($debugLog, json_encode($dbg, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
 
             if ($result && $result->num_rows > 0) {
                 while ($row = $result->fetch_assoc()) {
