@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // products/create.php - 新增商品表單（純展示層）
 // 所有數據已由 products.php 準備好：$categories
 ?>
@@ -15,15 +16,19 @@
                     <input class="pm-input" type="text" name="name" required placeholder="請輸入商品名稱">
                 </div>
                 <div class="pm-col-3">
-                    <label>分類</label>
-                    <select class="pm-select" name="category_id" id="category_select" onchange="toggleNewCategory(this)">
-                        <option value="">不分類</option>
-                        <?php foreach ($categories as $cat): ?>
-                            <option value="<?php echo intval($cat['category_id']); ?>"><?php echo htmlspecialchars($cat['name']); ?></option>
-                        <?php endforeach; ?>
-                        <option value="new" style="color:#2563eb; font-weight:bold;">+ 新增分類</option>
-                    </select>
-                    <input type="text" class="pm-input" name="new_category_name" id="new_category_name" style="display:none; margin-top:8px;" placeholder="輸入新分類名稱">
+                    <label>分類（可多選）</label>
+                    <div class="category-dropdown" style="position:relative;">
+                        <button type="button" class="pm-select category-toggle" style="text-align:left; width:100%;">選擇分類</button>
+                        <div class="category-menu" style="position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-top:6px; padding:10px; max-height:200px; overflow:auto; display:none; z-index:20;">
+                            <?php foreach ($categories as $cat): ?>
+                                <label style="font-weight: normal; cursor: pointer; display:flex; align-items:center; gap:6px; padding:6px 4px;">
+                                    <input type="checkbox" name="category_ids[]" value="<?php echo intval($cat['category_id']); ?>">
+                                    <?php echo htmlspecialchars($cat['name']); ?>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <input type="text" class="pm-input" name="new_category_name" style="margin-top:8px;" placeholder="新增分類名稱（選填）">
                 </div>
                 <div class="pm-col-3" style="display:flex; align-items:center; padding-bottom:8px;">
                     <label style="margin:0; cursor:pointer; display:flex; align-items:center; gap:6px;">
@@ -65,8 +70,16 @@
                             <input class="pm-input sku-color-input" type="text" name="color[]" placeholder="例如：消光黑">
                         </div>
                         <div class="pm-col-3">
-                            <label>價格 (NT$) <span style="color:#ef4444;">*</span></label>
-                            <input class="pm-input" type="number" name="price[]" min="0" step="1" required placeholder="0">
+                            <label>原價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <input class="pm-input" type="number" name="original_price[]" min="0" step="1" required placeholder="0">
+                        </div>
+                        <div class="pm-col-3">
+                            <label>特價 (NT$)</label>
+                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" placeholder="可留空">
+                        </div>
+                        <div class="pm-col-3">
+                            <label>會員價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <input class="pm-input" type="number" name="member_price[]" min="0" step="1" required placeholder="0">
                         </div>
                         <div class="pm-col-3">
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>
@@ -95,16 +108,21 @@
 </section>
 
 <script>
-// 獨立的分類選單切換邏輯
-function toggleNewCategory(select) {
-    const newCatInput = document.getElementById('new_category_name');
-    if(select.value === 'new') {
-        newCatInput.style.display = 'block';
-        newCatInput.required = true;
-    } else {
-        newCatInput.style.display = 'none';
-        newCatInput.required = false;
-        newCatInput.value = '';
-    }
-}
+document.addEventListener('DOMContentLoaded', function() {
+    const dropdown = document.querySelector('.category-dropdown');
+    if (!dropdown) return;
+    const toggle = dropdown.querySelector('.category-toggle');
+    const menu = dropdown.querySelector('.category-menu');
+
+    toggle.addEventListener('click', function() {
+        menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+    });
+
+    document.addEventListener('click', function(event) {
+        if (!dropdown.contains(event.target)) {
+            menu.style.display = 'none';
+        }
+    });
+});
 </script>
+

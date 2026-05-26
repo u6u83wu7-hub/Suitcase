@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // Dashboard placeholder
 ?>
 <h1>📊 營運儀表板</h1>

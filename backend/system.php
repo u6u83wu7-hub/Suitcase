@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // System & security management placeholder
 ?>
 <h1>⚙️ 系統與權限管理</h1>

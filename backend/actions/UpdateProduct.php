@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/UpdateProduct.php - 更新商品
 
 if ($action !== 'update_product') {
@@ -15,9 +16,20 @@ if ($name === '') {
     goProducts('請輸入商品名稱');
 }
 
-$categoryId = null;
-if (isset($_POST['category_id']) && $_POST['category_id'] !== '') {
-    $categoryId = intval($_POST['category_id']);
+// 分類（多選 + 動態新增）
+$categoryIds = isset($_POST['category_ids']) && is_array($_POST['category_ids'])
+    ? array_values(array_unique(array_map('intval', $_POST['category_ids'])))
+    : [];
+
+if (!empty($_POST['new_category_name'])) {
+    $newCatName = trim($_POST['new_category_name']);
+    if ($newCatName !== '') {
+        $stmtCat = $conn->prepare("INSERT INTO categories (name) VALUES (?)");
+        $stmtCat->bind_param("s", $newCatName);
+        if ($stmtCat->execute()) {
+            $categoryIds[] = $conn->insert_id;
+        }
+    }
 }
 
 $isFeatured = boolPost('is_featured') ? 1 : 0;
@@ -28,9 +40,9 @@ $conn->begin_transaction();
 
 try {
     // 更新商品主檔
-    $setCols = ['primary_category_id = ?', 'name = ?', 'is_featured = ?'];
-    $bindTypes = 'isi';
-    $bindVals = [$categoryId, $name, $isFeatured];
+    $setCols = ['name = ?', 'is_featured = ?'];
+    $bindTypes = 'si';
+    $bindVals = [$name, $isFeatured];
 
     if (in_array('description', $productColumns, true)) {
         $setCols[] = 'description = ?';
@@ -59,27 +71,31 @@ try {
     $variantIds = isset($_POST['variant_id']) && is_array($_POST['variant_id']) ? $_POST['variant_id'] : [];
     $sizes = isset($_POST['size_inches']) && is_array($_POST['size_inches']) ? $_POST['size_inches'] : [];
     $colors = isset($_POST['color']) && is_array($_POST['color']) ? $_POST['color'] : [];
-    $prices = isset($_POST['price']) && is_array($_POST['price']) ? $_POST['price'] : [];
+    $originalPrices = isset($_POST['original_price']) && is_array($_POST['original_price']) ? $_POST['original_price'] : [];
+    $specialPrices = isset($_POST['special_price']) && is_array($_POST['special_price']) ? $_POST['special_price'] : [];
+    $memberPrices = isset($_POST['member_price']) && is_array($_POST['member_price']) ? $_POST['member_price'] : [];
     $stocks = isset($_POST['stock']) && is_array($_POST['stock']) ? $_POST['stock'] : [];
 
     $keepIds = [];
     $hasValidVariant = false;
 
-    for ($i = 0; $i < count($prices); $i++) {
-        if ($prices[$i] === '' || $stocks[$i] === '') {
+    for ($i = 0; $i < count($originalPrices); $i++) {
+        if ($originalPrices[$i] === '' || $memberPrices[$i] === '' || $stocks[$i] === '') {
             continue;
         }
         $hasValidVariant = true;
         $variantId = isset($variantIds[$i]) ? intval($variantIds[$i]) : 0;
-        $price = floatval($prices[$i]);
+        $originalPrice = floatval($originalPrices[$i]);
+        $specialPrice = isset($specialPrices[$i]) && $specialPrices[$i] !== '' ? floatval($specialPrices[$i]) : null;
+        $memberPrice = floatval($memberPrices[$i]);
         $stock = intval($stocks[$i]);
         $size = isset($sizes[$i]) ? trim($sizes[$i]) : '';
         $color = isset($colors[$i]) ? trim($colors[$i]) : '';
 
         if ($variantId > 0) {
-            $vSet = ['price = ?', 'stock_available = ?'];
-            $vTypes = 'di';
-            $vVals = [$price, $stock];
+            $vSet = ['original_price = ?', 'special_price = ?', 'member_price = ?', 'stock_available = ?'];
+            $vTypes = 'dddi';
+            $vVals = [$originalPrice, $specialPrice, $memberPrice, $stock];
 
             if (in_array('size_inches', $variantColumns, true)) {
                 $vSet[] = 'size_inches = ?';
@@ -105,9 +121,9 @@ try {
             $keepIds[] = $variantId;
         } else {
             $skuCode = 'AL-' . strtoupper(substr(md5($productId . '-' . $i . '-' . microtime(true)), 0, 10));
-            $vCols = ['product_id', 'sku_code', 'price', 'stock_available'];
-            $vTypes = 'isdi';
-            $vVals = [$productId, $skuCode, $price, $stock];
+            $vCols = ['product_id', 'sku_code', 'original_price', 'special_price', 'member_price', 'stock_available'];
+            $vTypes = 'isdddi';
+            $vVals = [$productId, $skuCode, $originalPrice, $specialPrice, $memberPrice, $stock];
 
             if (in_array('size_inches', $variantColumns, true)) {
                 $vCols[] = 'size_inches';
@@ -143,7 +159,19 @@ try {
         $conn->query("DELETE FROM product_variants WHERE product_id = {$productId}");
     }
 
-    // 更新既有圖片顏色
+    $conn->query("DELETE FROM product_category_links WHERE product_id = {$productId}");
+    if (!empty($categoryIds)) {
+        $categoryIds = array_values(array_unique(array_filter(array_map('intval', $categoryIds))));
+        $linkStmt = $conn->prepare("INSERT INTO product_category_links (product_id, category_id) VALUES (?, ?)");
+        foreach ($categoryIds as $catId) {
+            $linkStmt->bind_param('ii', $productId, $catId);
+            if (!$linkStmt->execute()) {
+                throw new Exception('分類關聯更新失敗');
+            }
+        }
+    }
+
+    // 👇 修改點 2：更新既有圖片顏色 (修復空值存入變成 0 的問題)
     if (in_array('color', $imageColumns, true) && isset($_POST['existing_image_color']) && is_array($_POST['existing_image_color'])) {
         foreach ($_POST['existing_image_color'] as $imgId => $colorVal) {
             $imgId = intval($imgId);
@@ -151,6 +179,11 @@ try {
                 continue;
             }
             $colorVal = trim($colorVal);
+            // 如果沒選顏色，強制轉為 NULL 存入，避免資料庫誤存為 '0'
+            if ($colorVal === '') {
+                $colorVal = null;
+            }
+            
             $stmtColor = $conn->prepare('UPDATE product_images SET color = ? WHERE image_id = ? AND product_id = ?');
             $stmtColor->bind_param('sii', $colorVal, $imgId, $productId);
             $stmtColor->execute();
@@ -276,3 +309,4 @@ try {
     $conn->rollback();
     goProducts('錯誤: ' . $e->getMessage());
 }
+?>

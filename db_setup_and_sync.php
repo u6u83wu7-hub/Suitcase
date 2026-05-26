@@ -56,7 +56,6 @@ $conn->query($sql_sup);
 // 📁 表格 4：商品主檔 (products)
 $sql_prod = "CREATE TABLE IF NOT EXISTS `products` (
     `product_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `primary_category_id` INT NULL,
     `supplier_id` INT NULL,
     `slug` VARCHAR(255) NOT NULL UNIQUE,
     `name` VARCHAR(255) NOT NULL,
@@ -80,7 +79,9 @@ $sql_vars = "CREATE TABLE IF NOT EXISTS `product_variants` (
     `color` VARCHAR(50) NULL,
     `size_inches` VARCHAR(50) NULL,
     `capacity_liters` VARCHAR(50) NULL,
-    `price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `special_price` DECIMAL(10,2) NULL,
+    `member_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `stock_available` INT NOT NULL DEFAULT 0,
     `stock_reserved` INT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
@@ -193,6 +194,16 @@ if (!columnExists($conn, 'products', 'warranty_info')) {
     if ($conn->query($sql)) {
         echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `warranty_info` 欄位</p>";
     }
+// 追加 B: 多分類對應表 (product_category_links)
+}
+
+$sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
+    `product_id` INT NOT NULL,
+    `category_id` INT NOT NULL,
+    PRIMARY KEY (`product_id`, `category_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+if ($conn->query($sql_links)) {
+    echo "<p style='color:green;'>✅ 已確認 `product_category_links` 多分類關聯表</p>";
 }
 
 // 防呆 B：如果組員的 product_variants 裡有上版殘留的 `size` 欄位，自動將其移除
@@ -203,7 +214,28 @@ if (columnExists($conn, 'product_variants', 'size')) {
     }
 }
 
-// 👇👇👇 新增的防呆 C：檢查 size_inches 的型態是否為 VARCHAR，如果不是就自動修改 👇👇👇
+// 防呆 C：SKU 價格欄位拆分（original/special/member）
+if (!columnExists($conn, 'product_variants', 'original_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `capacity_liters`");
+    echo "<p style='color:green;'>✅ 已新增 `original_price` 欄位</p>";
+}
+if (!columnExists($conn, 'product_variants', 'special_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `special_price` DECIMAL(10,2) NULL AFTER `original_price`");
+    echo "<p style='color:green;'>✅ 已新增 `special_price` 欄位</p>";
+}
+if (!columnExists($conn, 'product_variants', 'member_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `member_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `special_price`");
+    echo "<p style='color:green;'>✅ 已新增 `member_price` 欄位</p>";
+}
+
+// 將舊 price 搬到新欄位，並移除 price
+if (columnExists($conn, 'product_variants', 'price')) {
+    $conn->query("UPDATE `product_variants` SET `original_price` = `price`, `member_price` = `price` WHERE `original_price` = 0.00 AND `member_price` = 0.00");
+    $conn->query("ALTER TABLE `product_variants` DROP COLUMN `price`");
+    echo "<p style='color:orange;'>⚠️ 已將 `price` 搬移至 `original_price`/`member_price` 並移除舊欄位</p>";
+}
+
+// 👇👇👇 新增的防呆 D：檢查 size_inches 的型態是否為 VARCHAR，如果不是就自動修改 👇👇👇
 $checkSizeCol = $conn->query("SHOW COLUMNS FROM `product_variants` LIKE 'size_inches'");
 if ($checkSizeCol && $checkSizeCol->num_rows > 0) {
     $colData = $checkSizeCol->fetch_assoc();
@@ -216,7 +248,20 @@ if ($checkSizeCol && $checkSizeCol->num_rows > 0) {
         echo "<p style='color:gray;'>ℹ️ 狀態：`size_inches` 欄位型態已是 VARCHAR，支援中文字存取。</p>";
     }
 }
-// 👆👆👆 結束防呆 C 👆👆👆
+// 👆👆👆 結束防呆 D 👆👆👆
+
+// 防呆 E：把舊的 primary_category_id 同步進多分類關聯表
+if (columnExists($conn, 'products', 'primary_category_id')) {
+    $sqlSync = "INSERT IGNORE INTO product_category_links (product_id, category_id)
+                SELECT product_id, primary_category_id
+                FROM products
+                WHERE primary_category_id IS NOT NULL";
+    if ($conn->query($sqlSync)) {
+        echo "<p style='color:green;'>✅ 已同步 products.primary_category_id 到 product_category_links</p>";
+    }
+    $conn->query("ALTER TABLE `products` DROP COLUMN `primary_category_id`");
+    echo "<p style='color:orange;'>⚠️ 已移除 products.primary_category_id</p>";
+}
 
 // === 預填初始資料 ===
 $checkAdmin = $conn->query("SELECT * FROM admin_users WHERE username = 'admin'");

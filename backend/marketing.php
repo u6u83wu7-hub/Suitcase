@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // Marketing & content management placeholder
 ?>
 <h1>📢 行銷與內容管理</h1>

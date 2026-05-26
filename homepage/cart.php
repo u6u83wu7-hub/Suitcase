@@ -18,7 +18,13 @@ if (isset($_SESSION['user_id'])) {
     $stmt = $conn->prepare("
         SELECT ci.cart_item_id, ci.quantity,
                p.product_id, p.name,
-               pv.variant_id, pv.sku_code, pv.color, pv.size_inches, pv.price, pv.stock_available,
+               pv.variant_id, pv.sku_code, pv.color, pv.size_inches,
+               CASE
+                   WHEN pv.special_price IS NOT NULL AND pv.special_price > 0 THEN pv.special_price
+                   WHEN pv.member_price > 0 THEN pv.member_price
+                   ELSE pv.original_price
+               END AS price,
+               pv.stock_available,
                (
                    SELECT image_url
                    FROM product_images

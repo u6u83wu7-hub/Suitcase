@@ -53,7 +53,13 @@ try {
     $itemStmt = $conn->prepare("
         SELECT ci.cart_item_id, ci.quantity,
                p.name AS product_name,
-               pv.variant_id, pv.sku_code, pv.color, pv.size_inches, pv.price, pv.stock_available
+               pv.variant_id, pv.sku_code, pv.color, pv.size_inches,
+               CASE
+                   WHEN pv.special_price IS NOT NULL AND pv.special_price > 0 THEN pv.special_price
+                   WHEN pv.member_price > 0 THEN pv.member_price
+                   ELSE pv.original_price
+               END AS price,
+               pv.stock_available
         FROM cart_items ci
         INNER JOIN product_variants pv ON pv.variant_id = ci.variant_id
         INNER JOIN products p ON p.product_id = pv.product_id

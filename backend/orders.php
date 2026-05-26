@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
+
 $selectedOrderId = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
 $allowedStatuses = ['PENDING', 'PAID', 'SHIPPING', 'COMPLETED', 'CANCELLED'];
 

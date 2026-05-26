@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/BulkUpdateProducts.php - 批量更新商品
 
 if ($action !== 'bulk_update_products') {

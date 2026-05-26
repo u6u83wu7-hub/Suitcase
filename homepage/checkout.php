@@ -25,7 +25,12 @@ $userStmt->execute();
 $user = $userStmt->get_result()->fetch_assoc();
 
 $stmt = $conn->prepare("
-    SELECT ci.quantity, p.name, pv.color, pv.size_inches, pv.price
+    SELECT ci.quantity, p.name, pv.color, pv.size_inches,
+           CASE
+               WHEN pv.special_price IS NOT NULL AND pv.special_price > 0 THEN pv.special_price
+               WHEN pv.member_price > 0 THEN pv.member_price
+               ELSE pv.original_price
+           END AS price
     FROM carts c
     INNER JOIN cart_items ci ON ci.cart_id = c.cart_id
     INNER JOIN product_variants pv ON pv.variant_id = ci.variant_id

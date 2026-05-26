@@ -2,12 +2,7 @@
 // backend_action.php - 统一路由器
 // 分發請求到各个 action 處理器
 
-session_start();
-
-// 管理員驗證
-if (!isset($_SESSION['admin_id'])) {
-    die("Access Denied");
-}
+require_once __DIR__ . '/auth_guard.php';
 
 // 資料庫連線
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
@@ -27,6 +22,12 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
 function goProducts($message = '') {
     $safe = addslashes($message);
     echo "<script>" . ($message !== '' ? "alert('{$safe}');" : '') . "location.href='backend.php?page=products';</script>";
+    exit();
+}
+
+function goCategories($message = '') {
+    $safe = addslashes($message);
+    echo "<script>" . ($message !== '' ? "alert('{$safe}');" : '') . "location.href='backend.php?page=categories';</script>";
     exit();
 }
 
@@ -61,6 +62,11 @@ $actions = [
     'bulk_update_products' => 'actions/BulkUpdateProducts.php',
     'delete_product' => 'actions/DeleteProduct.php',
     'update_order_status' => 'actions/UpdateOrderStatus.php',
+    'add_category' => 'actions/CategoryActions.php',
+    'update_category' => 'actions/CategoryActions.php',
+    'delete_category' => 'actions/CategoryActions.php',
+    'add_product_to_category' => 'actions/CategoryActions.php',      // 👈 新增這行
+    'remove_product_from_category' => 'actions/CategoryActions.php', // 👈 新增這行
 ];
 
 // 分发请求

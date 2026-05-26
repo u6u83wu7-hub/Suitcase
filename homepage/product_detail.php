@@ -12,8 +12,24 @@ $productId = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
 $stmt = $conn->prepare("
     SELECT p.*, c.name AS category_name,
-        (SELECT MIN(price) FROM product_variants WHERE product_id = p.product_id) AS min_price,
-        (SELECT MAX(price) FROM product_variants WHERE product_id = p.product_id) AS max_price
+        (
+            SELECT MIN(CASE
+                WHEN special_price IS NOT NULL AND special_price > 0 THEN special_price
+                WHEN member_price > 0 THEN member_price
+                ELSE original_price
+            END)
+            FROM product_variants
+            WHERE product_id = p.product_id
+        ) AS min_price,
+        (
+            SELECT MAX(CASE
+                WHEN special_price IS NOT NULL AND special_price > 0 THEN special_price
+                WHEN member_price > 0 THEN member_price
+                ELSE original_price
+            END)
+            FROM product_variants
+            WHERE product_id = p.product_id
+        ) AS max_price
     FROM products p
     LEFT JOIN categories c ON c.category_id = p.primary_category_id
     WHERE p.product_id = ? AND p.status = 'ON SHELF'
@@ -28,7 +44,13 @@ $images = [];
 
 if ($product) {
     $variantStmt = $conn->prepare("
-        SELECT variant_id, sku_code, color, size_inches, capacity_liters, price, stock_available
+        SELECT variant_id, sku_code, color, size_inches, capacity_liters,
+            CASE
+                WHEN special_price IS NOT NULL AND special_price > 0 THEN special_price
+                WHEN member_price > 0 THEN member_price
+                ELSE original_price
+            END AS price,
+            stock_available
         FROM product_variants
         WHERE product_id = ?
         ORDER BY price ASC, variant_id ASC

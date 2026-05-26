@@ -141,6 +141,7 @@ if (isset($_SESSION['user_id']) && isset($conn) && $conn instanceof mysqli) {
                             </div>
                             <a href="my_orders.php">我的訂單</a>
                             <a href="profile.php">會員資料</a>
+                            <a href="change_password.php">修改密碼</a>
                             <a href="logout.php">登出</a>
                         </div>
                     </div>

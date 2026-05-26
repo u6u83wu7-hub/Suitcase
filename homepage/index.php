@@ -38,7 +38,11 @@ include 'header.php';
            $sql = "SELECT 
                         p.product_id, 
                         p.name, 
-                        v.price, 
+                        CASE
+                            WHEN v.special_price IS NOT NULL AND v.special_price > 0 THEN v.special_price
+                            WHEN v.member_price > 0 THEN v.member_price
+                            ELSE v.original_price
+                        END AS price,
                         i.image_url 
                     FROM products p
                     INNER JOIN product_variants v 

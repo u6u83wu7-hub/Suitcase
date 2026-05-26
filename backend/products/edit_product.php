@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // products/edit_product.php - 編輯商品頁面（置於子資料夾內）
 
 $product_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
@@ -22,6 +23,16 @@ $categories = [];
 $catRes = $conn->query("SELECT * FROM categories ORDER BY name ASC");
 if ($catRes) while ($c = $catRes->fetch_assoc()) $categories[] = $c;
 
+// 2.1 取得商品既有分類
+$selectedCategoryIds = [];
+$linkStmt = $conn->prepare("SELECT category_id FROM product_category_links WHERE product_id = ?");
+$linkStmt->bind_param("i", $product_id);
+$linkStmt->execute();
+$linkRes = $linkStmt->get_result();
+while ($link = $linkRes->fetch_assoc()) {
+    $selectedCategoryIds[] = (int)$link['category_id'];
+}
+
 // 3. 取得所有 SKU 規格
 $variants = [];
 $vStmt = $conn->prepare("SELECT * FROM product_variants WHERE product_id = ?");
@@ -30,7 +41,15 @@ $vStmt->execute();
 $vRes = $vStmt->get_result();
 while ($v = $vRes->fetch_assoc()) $variants[] = $v;
 if (empty($variants)) { 
-    $variants[] = ['variant_id' => '', 'size_inches' => '', 'color' => '', 'price' => 0, 'stock_available' => 0];
+    $variants[] = [
+        'variant_id' => '',
+        'size_inches' => '',
+        'color' => '',
+        'original_price' => 0,
+        'special_price' => null,
+        'member_price' => 0,
+        'stock_available' => 0
+    ];
 }
 
 // 4. 取得舊圖片
@@ -54,16 +73,21 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                     <label>商品名稱 <span style="color:#ef4444;">*</span></label>
                     <input class="pm-input" type="text" name="name" required value="<?= htmlspecialchars($product['name']) ?>">
                 </div>
+                
                 <div class="pm-col-3">
-                    <label>分類</label>
-                    <select class="pm-select" name="category_id">
-                        <option value="">不分類</option>
-                        <?php foreach ($categories as $cat): ?>
-                            <option value="<?= $cat['category_id'] ?>" <?= $cat['category_id'] == $product['primary_category_id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($cat['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <label>分類（可多選）</label>
+                    <div class="category-dropdown" style="position:relative;">
+                        <button type="button" class="pm-select category-toggle" style="text-align:left; width:100%;">選擇分類</button>
+                        <div class="category-menu" style="position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-top:6px; padding:10px; max-height:200px; overflow:auto; display:none; z-index:20;">
+                            <?php foreach ($categories as $cat): ?>
+                                <label style="font-weight: normal; cursor: pointer; display:flex; align-items:center; gap:6px; padding:6px 4px;">
+                                    <input type="checkbox" name="category_ids[]" value="<?= intval($cat['category_id']) ?>" <?= in_array((int)$cat['category_id'], $selectedCategoryIds, true) ? 'checked' : '' ?>>
+                                    <?= htmlspecialchars($cat['name']) ?>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <input type="text" class="pm-input" name="new_category_name" style="margin-top:8px;" placeholder="新增分類名稱（選填）">
                 </div>
                 <div class="pm-col-3" style="display:flex; align-items:center; padding-bottom:8px;">
                     <label style="margin:0; cursor:pointer; display:flex; align-items:center; gap:6px;">
@@ -101,8 +125,16 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                             <input class="pm-input sku-color-input" type="text" name="color[]" value="<?= htmlspecialchars($v['color'] ?? '') ?>">
                         </div>
                         <div class="pm-col-3">
-                            <label>價格 (NT$) <span style="color:#ef4444;">*</span></label>
-                            <input class="pm-input" type="number" name="price[]" min="0" step="1" required value="<?= floatval($v['price']) ?>">
+                            <label>原價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <input class="pm-input" type="number" name="original_price[]" min="0" step="1" required value="<?= floatval($v['original_price'] ?? 0) ?>">
+                        </div>
+                        <div class="pm-col-3">
+                            <label>特價 (NT$)</label>
+                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" value="<?= $v['special_price'] === null ? '' : floatval($v['special_price']) ?>">
+                        </div>
+                        <div class="pm-col-3">
+                            <label>會員價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <input class="pm-input" type="number" name="member_price[]" min="0" step="1" required value="<?= floatval($v['member_price'] ?? 0) ?>">
                         </div>
                         <div class="pm-col-3">
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>
@@ -161,6 +193,23 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
 </section>
 
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dropdown = document.querySelector('.category-dropdown');
+    if (!dropdown) return;
+    const toggle = dropdown.querySelector('.category-toggle');
+    const menu = dropdown.querySelector('.category-menu');
+
+    toggle.addEventListener('click', function() {
+        menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+    });
+
+    document.addEventListener('click', function(event) {
+        if (!dropdown.contains(event.target)) {
+            menu.style.display = 'none';
+        }
+    });
+});
+
 // 針對現有圖片與新圖片的連動顏色下拉選單處理腳本
 (function() {
     function getAvailableColors() {
@@ -204,3 +253,4 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
         });
     }
 })();
+</script>
