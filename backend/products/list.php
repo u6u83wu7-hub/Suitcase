@@ -108,20 +108,11 @@ require_once __DIR__ . '/../auth_guard.php';
                                     </a>
                                 </td>
                                 <td>
-                                    <?php
-                                    if ($row['primary_category_id'] === null) {
-                                        echo '<span style="color:#94a3b8;">不分類</span>';
-                                    } else {
-                                        $matched = '未命名分類';
-                                        foreach ($categories as $cat) {
-                                            if ((int)$cat['category_id'] === (int)$row['primary_category_id']) {
-                                                $matched = $cat['name'];
-                                                break;
-                                            }
-                                        }
-                                        echo htmlspecialchars($matched);
-                                    }
-                                    ?>
+                                    <?php if (empty($row['category_names'])): ?>
+                                        <span style="color:#94a3b8;">不分類</span>
+                                    <?php else: ?>
+                                        <?php echo htmlspecialchars($row['category_names']); ?>
+                                    <?php endif; ?>
                                 </td>
                                 <td><?php echo intval($row['sku_count']); ?></td>
                                 <td>

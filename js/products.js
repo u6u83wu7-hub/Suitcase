@@ -41,7 +41,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<div class="pm-grid">' +
                     '<div class="pm-col-3"><label>尺寸</label><input class="pm-input" type="text" name="size_inches[]" list="size-list" required placeholder="請選擇或輸入尺寸"></div>' +
                     '<div class="pm-col-3"><label>顏色</label><input class="pm-input sku-color-input" type="text" name="color[]" placeholder="例如：消光黑"></div>' +
-                    '<div class="pm-col-3"><label>價格 (NT$)</label><input class="pm-input" type="number" name="price[]" min="0" step="1" required placeholder="0"></div>' +
+                    '<div class="pm-col-3"><label>原價 (NT$)</label><input class="pm-input" type="number" name="original_price[]" min="0" step="1" required placeholder="0"></div>' +
+                    '<div class="pm-col-3"><label>特價 (NT$)</label><input class="pm-input" type="number" name="special_price[]" min="0" step="1" placeholder="可留空"></div>' +
+                    '<div class="pm-col-3"><label>會員價 (NT$)</label><input class="pm-input" type="number" name="member_price[]" min="0" step="1" required placeholder="0"></div>' +
                     '<div class="pm-col-3"><label>庫存數量</label><input class="pm-input" type="number" name="stock[]" min="0" step="1" required placeholder="0"></div>' +
                 '</div>' +
                 '<div style="text-align:right; margin-top:10px;">' +

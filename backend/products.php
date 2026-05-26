@@ -46,9 +46,9 @@ if ($keyword !== '') {
 }
 if ($categoryFilter !== '') {
     if ($categoryFilter === 'none') {
-        $conditions[] = "p.primary_category_id IS NULL";
+        $conditions[] = "NOT EXISTS (SELECT 1 FROM product_category_links pcl WHERE pcl.product_id = p.product_id)";
     } else {
-        $conditions[] = "p.primary_category_id = " . intval($categoryFilter);
+        $conditions[] = "EXISTS (SELECT 1 FROM product_category_links pcl WHERE pcl.product_id = p.product_id AND pcl.category_id = " . intval($categoryFilter) . ")";
     }
 }
 if ($statusFilter !== '') {
@@ -99,13 +99,13 @@ $productSql = "
     SELECT
         p.product_id,
         p.name,
-        p.primary_category_id,
         p.status,
         p.is_featured,
         COUNT(v.product_id) AS sku_count,
         COALESCE(SUM(v.stock_available), 0) AS total_stock,
-        MIN(v.price) AS min_price,
-        MAX(v.price) AS max_price,
+        MIN(COALESCE(v.special_price, v.original_price)) AS min_price,
+        MAX(COALESCE(v.special_price, v.original_price)) AS max_price,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS category_names,
         (
             SELECT pi.image_url
             FROM product_images pi
@@ -115,6 +115,8 @@ $productSql = "
         ) AS main_image
     FROM products p
     LEFT JOIN product_variants v ON v.product_id = p.product_id
+    LEFT JOIN product_category_links pcl ON pcl.product_id = p.product_id
+    LEFT JOIN categories c ON c.category_id = pcl.category_id
     {$whereClause}
     GROUP BY p.product_id
     ORDER BY {$productOrderBy}
