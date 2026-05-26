@@ -3,15 +3,7 @@
 // 分發請求到各个 action 處理器
 
 require_once __DIR__ . '/auth_guard.php';
-
-// 資料庫連線
-$conn = new mysqli("localhost", "root", "", "all_pass_db");
-
-if ($conn->connect_error) {
-    die("資料庫連線失敗：" . $conn->connect_error);
-}
-
-$conn->set_charset("utf8mb4");
+require_once __DIR__ . '/db_connect.php';
 
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     header("Location: backend.php?page=products");
