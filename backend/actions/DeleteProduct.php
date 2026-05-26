@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/../auth_guard.php';
 // actions/DeleteProduct.php - 删除商品及其相关数据
 
 if ($action !== 'delete_product') {

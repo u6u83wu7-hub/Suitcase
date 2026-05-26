@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/auth_guard.php';
 // products.php - 商品管理主頁面（容器）
 // $conn 由 backend.php 提供
 
@@ -45,9 +46,9 @@ if ($keyword !== '') {
 }
 if ($categoryFilter !== '') {
     if ($categoryFilter === 'none') {
-        $conditions[] = "p.primary_category_id IS NULL";
+        $conditions[] = "NOT EXISTS (SELECT 1 FROM product_category_links pcl WHERE pcl.product_id = p.product_id)";
     } else {
-        $conditions[] = "p.primary_category_id = " . intval($categoryFilter);
+        $conditions[] = "EXISTS (SELECT 1 FROM product_category_links pcl WHERE pcl.product_id = p.product_id AND pcl.category_id = " . intval($categoryFilter) . ")";
     }
 }
 if ($statusFilter !== '') {
@@ -98,13 +99,13 @@ $productSql = "
     SELECT
         p.product_id,
         p.name,
-        p.primary_category_id,
         p.status,
         p.is_featured,
         COUNT(v.product_id) AS sku_count,
         COALESCE(SUM(v.stock_available), 0) AS total_stock,
-        MIN(v.price) AS min_price,
-        MAX(v.price) AS max_price,
+        MIN(COALESCE(v.special_price, v.original_price)) AS min_price,
+        MAX(COALESCE(v.special_price, v.original_price)) AS max_price,
+        GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS category_names,
         (
             SELECT pi.image_url
             FROM product_images pi
@@ -114,6 +115,8 @@ $productSql = "
         ) AS main_image
     FROM products p
     LEFT JOIN product_variants v ON v.product_id = p.product_id
+    LEFT JOIN product_category_links pcl ON pcl.product_id = p.product_id
+    LEFT JOIN categories c ON c.category_id = pcl.category_id
     {$whereClause}
     GROUP BY p.product_id
     ORDER BY {$productOrderBy}
@@ -131,9 +134,18 @@ function buildFilterQuery(array $overrides = []) {
         'featured_filter' => isset($_GET['featured_filter']) ? $_GET['featured_filter'] : '',
         'p' => isset($_GET['p']) ? $_GET['p'] : 1,
     ];
+
+    // 💡 新增：如果切換分頁或點擊篩選時，自動清除編輯模式的參數，防止卡在編輯頁面
+    if (isset($_GET['action']) && $_GET['action'] === 'edit') {
+        unset($base['action'], $base['id']);
+    }
+
     $merged = array_merge($base, $overrides);
     return 'backend.php?' . http_build_query($merged);
 }
+
+// 💡 核心邏輯：判斷目前是不是編輯模式 (網址包含 action=edit 且有商品 ID)
+$isEditMode = (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id']) && intval($_GET['id']) > 0);
 
 ?>
 <link rel="stylesheet" href="../css/products.css">
@@ -145,16 +157,26 @@ function buildFilterQuery(array $overrides = []) {
             <p class="pm-sub">支援搜尋篩選、批次上下架、快速編輯與多圖上傳。</p>
         </div>
         <div class="pm-tabs">
-            <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
-            <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
+            <?php if ($isEditMode): ?>
+                <a href="backend.php?page=products" class="pm-tab active" style="text-decoration: none;">⬅️ 返回商品列表</a>
+            <?php else: ?>
+                <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
+                <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
+            <?php endif; ?>
         </div>
     </div>
 
-    <!-- 引入商品列表 -->
-    <?php require __DIR__ . '/products/list.php'; ?>
-
-    <!-- 引入新增商品 -->
-    <?php require __DIR__ . '/products/create.php'; ?>
+    <?php 
+    // 💡 智慧切換頁面內容
+    if ($isEditMode) {
+        // 進入編輯模式：載入剛剛新增的 edit_product.php
+        require __DIR__ . '/products/edit_product.php'; 
+    } else {
+        // 正常模式：載入原本的列表與新增區塊
+        require __DIR__ . '/products/list.php'; 
+        require __DIR__ . '/products/create.php'; 
+    }
+    ?>
 </div>
 
-<script src="../js/products.js"></script>
+<script src="../js/products.js?v=<?php echo time(); ?>"></script>

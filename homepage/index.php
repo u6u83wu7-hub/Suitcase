@@ -35,22 +35,28 @@ include 'header.php';
              * v = product_variants (子檔) -> 抓價格
              * i = product_images (圖床) -> 抓標記為 is_main=1 的展示圖
              */
-           $sql = "SELECT 
-                        p.product_id, 
-                        p.name, 
-                        v.price, 
-                        i.image_url 
-                    FROM products p
-                    INNER JOIN product_variants v 
-                        ON p.product_id = v.product_id
-                    INNER JOIN product_images i 
-                        ON p.product_id = i.product_id
-                    WHERE p.is_featured = 1 
-                      AND i.is_main = 1 
-                      AND p.status = 'ON SHELF'
-                    ORDER BY p.created_at DESC";
+                     $sql = "SELECT
+                                                p.product_id,
+                                                p.name,
+                                                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                                                COALESCE(pi_main.image_url,
+                                                        (
+                                                                SELECT pi2.image_url
+                                                                FROM product_images pi2
+                                                                WHERE pi2.product_id = p.product_id
+                                                                ORDER BY pi2.sort_order ASC
+                                                                LIMIT 1
+                                                        )
+                                                ) AS image_url
+                                        FROM products p
+                                        LEFT JOIN product_variants v ON v.product_id = p.product_id
+                                        LEFT JOIN product_images pi_main ON pi_main.product_id = p.product_id AND pi_main.is_main = 1
+                                        WHERE p.is_featured = 1
+                                            AND p.status = 'ON SHELF'
+                                        GROUP BY p.product_id
+                                        ORDER BY p.created_at DESC";
 
-            $result = $conn->query($sql);
+                        $result = $conn->query($sql);
 
             if ($result && $result->num_rows > 0) {
                 while($row = $result->fetch_assoc()) {

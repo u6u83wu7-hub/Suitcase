@@ -1,10 +1,5 @@
 <?php
-session_start();
-
-if (!isset($_SESSION['admin_id'])) {
-    header("Location: admin_login.php");
-    exit();
-}
+require_once __DIR__ . '/auth_guard.php';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
@@ -18,7 +13,7 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'products';
 
 // White-list allowed pages to avoid path traversal
 $allowed = [
-    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile'
+    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile', 'edit_product'
 ];
 if (!in_array($page, $allowed)) {
     $page = 'products';

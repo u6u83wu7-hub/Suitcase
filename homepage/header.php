@@ -3,6 +3,32 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+if (!function_exists('hpTableExists')) {
+    function hpTableExists($conn, $tableName) {
+        $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+        $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+        return ($res && $res->num_rows > 0);
+    }
+}
+
+$cartBadgeCount = 0;
+if (isset($_SESSION['user_id'])) {
+    $headerConn = @new mysqli('localhost', 'root', '', 'all_pass_db');
+    if (!$headerConn->connect_error) {
+        $headerConn->set_charset('utf8mb4');
+        if (hpTableExists($headerConn, 'cart_items')) {
+            $userId = intval($_SESSION['user_id']);
+            $badgeSql = "SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM cart_items WHERE user_id = {$userId}";
+            $badgeRes = $headerConn->query($badgeSql);
+            if ($badgeRes && $badgeRes->num_rows > 0) {
+                $badgeRow = $badgeRes->fetch_assoc();
+                $cartBadgeCount = intval($badgeRow['total_qty']);
+            }
+        }
+        $headerConn->close();
+    }
+}
+
 if (!isset($pageTitle)) {
     $pageTitle = 'All Pass 行李箱專賣 | Your All-Access Pass';
 }
@@ -123,6 +149,7 @@ if (!isset($activeNav)) {
                                 Hi, <?php echo htmlspecialchars($_SESSION['user_name']); ?>
                             </div>
                             <a href="profile.php">會員資料</a>
+                            <a href="change_password.php">修改密碼</a>
                             <a href="logout.php">登出</a>
                         </div>
                     </div>
@@ -130,7 +157,7 @@ if (!isset($activeNav)) {
                     <a href="login.php" class="icon-btn" title="登入">👤</a>
                 <?php endif; ?>
 
-                <div class="icon-btn" title="購物車">🛒<span class="cart-badge">0</span></div>
+                <a href="cart.php" class="icon-btn" title="購物車">🛒<span class="cart-badge"><?php echo intval($cartBadgeCount); ?></span></a>
             </div>
         </div>
 
