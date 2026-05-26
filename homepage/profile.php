@@ -142,6 +142,9 @@ include 'header.php';
                 <div><strong>等級：</strong><?php echo htmlspecialchars($user['membership_level'] !== '' ? $user['membership_level'] : '一般會員'); ?></div>
                 <div><strong>註冊時間：</strong><?php echo htmlspecialchars($user['created_at']); ?></div>
             </div>
+            <div style="margin-top:14px;">
+                <a href="member_detail.php" style="display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border-radius:999px; background:#111; color:#fff; font-weight:700;">會員詳細資料</a>
+            </div>
         </section>
 
         <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
@@ -155,6 +158,9 @@ include 'header.php';
             <?php else: ?>
                 <p style="color:#777;">目前購物車沒有商品。</p>
             <?php endif; ?>
+            <div style="margin-top:14px;">
+                <a href="cart.php" style="display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700;">前往購物車</a>
+            </div>
         </section>
 
         <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
@@ -170,7 +176,7 @@ include 'header.php';
             <?php endif; ?>
         </section>
 
-        <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
+        <section id="order-history" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
             <h2 style="font-size:20px; margin-bottom:12px;">購買紀錄</h2>
             <?php if (!empty($orderRows)): ?>
                 <div style="overflow:auto;">
@@ -186,7 +192,7 @@ include 'header.php';
                         <tbody>
                             <?php foreach ($orderRows as $o): ?>
                                 <tr style="border-bottom:1px solid #f3f3f3;">
-                                    <td style="padding:8px 6px;"><?php echo htmlspecialchars($o['order_number'] !== '' ? $o['order_number'] : ('#' . $o['order_id'])); ?></td>
+                                    <td style="padding:8px 6px;"><a href="order_detail.php?order_number=<?php echo urlencode($o['order_number'] !== '' ? $o['order_number'] : ('#' . $o['order_id'])); ?>" style="color:#db6b6b; font-weight:700; text-decoration:none;"><?php echo htmlspecialchars($o['order_number'] !== '' ? $o['order_number'] : ('#' . $o['order_id'])); ?></a></td>
                                     <td style="padding:8px 6px;"><?php echo htmlspecialchars($o['status']); ?></td>
                                     <td style="padding:8px 6px;">NT$ <?php echo number_format(floatval($o['total_amount'])); ?></td>
                                     <td style="padding:8px 6px;"><?php echo htmlspecialchars($o['created_at']); ?></td>

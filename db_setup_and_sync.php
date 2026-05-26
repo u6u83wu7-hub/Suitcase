@@ -114,7 +114,77 @@ $sql_users = "CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_users);
 
-echo "<p style='color:blue;'>📋 基本 7 張資料表結構已確認/建立完成。</p>";
+// 📁 表格 8：訂單主檔 (orders)
+$sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
+    `order_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_number` VARCHAR(50) NOT NULL UNIQUE,
+    `user_id` INT NOT NULL,
+    `status` VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    `subtotal_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `shipping_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `recipient_name` VARCHAR(100) NULL,
+    `recipient_phone` VARCHAR(20) NULL,
+    `shipping_address` VARCHAR(255) NULL,
+    `payment_method` VARCHAR(30) NULL,
+    `cardholder_name` VARCHAR(100) NULL,
+    `card_brand` VARCHAR(30) NULL,
+    `card_last4` VARCHAR(4) NULL,
+    `card_expiry_month` VARCHAR(2) NULL,
+    `card_expiry_year` VARCHAR(4) NULL,
+    `note` TEXT NULL,
+    `paid_at` DATETIME NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_orders_user_id` (`user_id`),
+    INDEX `idx_orders_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_orders);
+
+if (!columnExists($conn, 'orders', 'cardholder_name')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `cardholder_name` VARCHAR(100) NULL AFTER `payment_method`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_month')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_month` VARCHAR(2) NULL AFTER `card_last4`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_year')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_year` VARCHAR(4) NULL AFTER `card_expiry_month`");
+}
+
+// 📁 表格 9：訂單明細 (order_items)
+$sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
+    `order_item_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    `variant_id` INT NULL,
+    `product_name` VARCHAR(255) NOT NULL,
+    `variant_name` VARCHAR(255) NULL,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `unit_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `subtotal_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_order_items_order_id` (`order_id`),
+    INDEX `idx_order_items_product_id` (`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_order_items);
+
+// 📁 表格 8：會員詳細資料 / 付款資訊（不儲存 CVV 與完整卡號）
+$sql_member_details = "CREATE TABLE IF NOT EXISTS `user_member_details` (
+    `member_detail_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL UNIQUE,
+    `full_address` VARCHAR(255) NULL,
+    `address_note` VARCHAR(255) NULL,
+    `cardholder_name` VARCHAR(100) NULL,
+    `card_last4` VARCHAR(4) NULL,
+    `card_brand` VARCHAR(30) NULL,
+    `expiry_month` VARCHAR(2) NULL,
+    `expiry_year` VARCHAR(4) NULL,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_member_details);
+
+echo "<p style='color:blue;'>📋 基本資料表結構已確認/建立完成。</p>";
+echo "<p style='color:blue;'>📋 訂單主檔與會員詳細資料表已確認/建立完成。</p>";
 
 // === 延伸欄位同步檢查 ===
 
