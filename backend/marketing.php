@@ -1,7 +1,9 @@
+<?php echo "現在伺服器顯示的時間是: " . date('Y-m-d H:i:s'); ?>
+
 <?php
 require_once __DIR__ . '/auth_guard.php';
 // marketing.php - 行銷活動管理主頁面
-//版本1
+//版本3
 function h($value) {
 	return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
@@ -163,6 +165,7 @@ if ($activeResult) {
 					<tr>
 						<th style="width:80px;">ID</th>
 						<th>活動名稱</th>
+						<th style="width:120px;">活動圖片</th>
 						<th style="width:160px;">折扣規則</th>
 						<th style="width:220px;">活動期間</th>
 						<th style="width:120px;">狀態</th>
@@ -181,6 +184,13 @@ if ($activeResult) {
 								<td>
 									<div style="font-weight:600; color:#0f172a;"><?php echo h($promo['name']); ?></div>
 									<div style="font-size:12px; color:#64748b; margin-top:4px;"><?php echo h($promo['description']); ?></div>
+								</td>
+								<td>
+									<?php if (!empty($promo['promotion_image_url'])): ?>
+										<img src="../<?php echo h($promo['promotion_image_url']); ?>" alt="活動圖片" style="width:90px; height:54px; object-fit:cover; border-radius:6px; border:1px solid #e2e8f0;">
+									<?php else: ?>
+										<span style="color:#94a3b8;">尚未上傳</span>
+									<?php endif; ?>
 								</td>
 								<td>
 									<?php if ($promo['discount_type'] === 'PERCENT'): ?>
@@ -205,6 +215,18 @@ if ($activeResult) {
 								<td><?php echo intval($promo['banner_count']); ?></td>
 								<td>
 									<div class="pm-actions">
+										<button class="pm-btn pm-btn-edit pm-btn-sm js-edit-promotion" type="button"
+											data-id="<?php echo intval($promo['id']); ?>"
+											data-name="<?php echo h($promo['name']); ?>"
+											data-description="<?php echo h($promo['description']); ?>"
+											data-discount-type="<?php echo h($promo['discount_type']); ?>"
+											data-discount-value="<?php echo h($promo['discount_value']); ?>"
+											data-start-at="<?php echo h(date('Y-m-d\TH:i', strtotime($promo['start_at']))); ?>"
+											data-end-at="<?php echo h(date('Y-m-d\TH:i', strtotime($promo['end_at']))); ?>"
+											data-is-active="<?php echo intval($promo['is_active']); ?>"
+											data-image-url="<?php echo h($promo['promotion_image_url']); ?>">
+											編輯
+										</button>
 										<button class="pm-btn pm-btn-sub pm-btn-sm js-bind-products" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">商品綁定</button>
 										<button class="pm-btn pm-btn-edit pm-btn-sm js-upload-banner" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">Banner</button>
 									</div>
@@ -213,7 +235,7 @@ if ($activeResult) {
 						<?php endforeach; ?>
 					<?php else: ?>
 						<tr>
-							<td colspan="9" style="text-align:center; padding:24px; color:#94a3b8;">目前沒有符合條件的活動。</td>
+							<td colspan="10" style="text-align:center; padding:24px; color:#94a3b8;">目前沒有符合條件的活動。</td>
 						</tr>
 					<?php endif; ?>
 				</tbody>
@@ -272,7 +294,7 @@ if ($activeResult) {
 			<div class="modal-title">新增行銷活動</div>
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closePromotionModal">✕ 關閉</button>
 		</div>
-		<form action="backend_action.php" method="POST" class="modal-body">
+		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
 			<input type="hidden" name="action" value="add_promotion">
 			<div class="pm-grid">
 				<div class="pm-col-6" style="grid-column: span 6;">
@@ -287,8 +309,13 @@ if ($activeResult) {
 					</select>
 				</div>
 				<div class="pm-col-6" style="grid-column: span 6;">
-					<label for="promotion_discount_value">折扣數值</label>
+					<label for="promotion_discount_value" id="promotion_discount_label">折扣數值</label>
 					<input class="pm-input" type="number" step="0.01" id="promotion_discount_value" name="discount_value" required placeholder="例如：15 或 200">
+				</div>
+				<div class="pm-col-12">
+					<label for="promotion_image">活動圖片（必填）</label>
+					<input class="pm-file-input" type="file" id="promotion_image" name="promotion_image" accept="image/*" required>
+					<div style="font-size:12px; color:#64748b; margin-top:6px;">活動圖片會作為活動主圖，即使不放首頁輪播也必須上傳。</div>
 				</div>
 				<div class="pm-col-6" style="grid-column: span 6;">
 					<label for="promotion_active">啟用活動</label>
@@ -309,8 +336,73 @@ if ($activeResult) {
 					<label for="promotion_description">活動描述</label>
 					<textarea class="pm-textarea" id="promotion_description" name="description" placeholder="簡單描述活動重點"></textarea>
 				</div>
+				<div class="pm-col-12">
+					<label>選擇活動商品</label>
+					<div class="product-grid" id="createProductsList"></div>
+				</div>
 				<div class="pm-col-12" style="display:flex; gap:10px; justify-content:flex-end;">
 					<button class="pm-btn pm-btn-main" type="submit">建立活動</button>
+				</div>
+			</div>
+		</form>
+	</div>
+</div>
+
+<div class="marketing-modal" id="editPromotionModal">
+	<div class="modal-panel">
+		<div class="modal-header">
+			<div class="modal-title" id="editPromotionTitle">編輯行銷活動</div>
+			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeEditPromotionModal">✕ 關閉</button>
+		</div>
+		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
+			<input type="hidden" name="action" value="update_promotion">
+			<input type="hidden" name="promotion_id" id="edit_promotion_id" value="">
+			<div class="pm-grid">
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_name">活動名稱</label>
+					<input class="pm-input" type="text" id="edit_promotion_name" name="name" required>
+				</div>
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_discount_type">折扣類型</label>
+					<select class="pm-select" id="edit_promotion_discount_type" name="discount_type" required>
+						<option value="PERCENT">百分比折扣</option>
+						<option value="AMOUNT">折抵金額</option>
+					</select>
+				</div>
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_discount_value" id="edit_promotion_discount_label">折扣數值</label>
+					<input class="pm-input" type="number" step="0.01" id="edit_promotion_discount_value" name="discount_value" required>
+				</div>
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_active">啟用活動</label>
+					<select class="pm-select" id="edit_promotion_active" name="is_active">
+						<option value="1">啟用</option>
+						<option value="0">停用</option>
+					</select>
+				</div>
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_start_at">開始時間</label>
+					<input class="pm-input" type="datetime-local" id="edit_promotion_start_at" name="start_at" required>
+				</div>
+				<div class="pm-col-6" style="grid-column: span 6;">
+					<label for="edit_promotion_end_at">結束時間</label>
+					<input class="pm-input" type="datetime-local" id="edit_promotion_end_at" name="end_at" required>
+				</div>
+				<div class="pm-col-12">
+					<label for="edit_promotion_description">活動描述</label>
+					<textarea class="pm-textarea" id="edit_promotion_description" name="description" placeholder="簡單描述活動重點"></textarea>
+				</div>
+				<div class="pm-col-12">
+					<label for="edit_promotion_image">更新活動圖片（未選擇則沿用舊圖）</label>
+					<input class="pm-file-input" type="file" id="edit_promotion_image" name="promotion_image" accept="image/*">
+					<div id="editImagePreview" style="margin-top:10px;"></div>
+				</div>
+				<div class="pm-col-12">
+					<label>選擇活動商品</label>
+					<div class="product-grid" id="editProductsList"></div>
+				</div>
+				<div class="pm-col-12" style="display:flex; gap:10px; justify-content:flex-end;">
+					<button class="pm-btn pm-btn-main" type="submit">儲存活動</button>
 				</div>
 			</div>
 		</form>
@@ -376,15 +468,24 @@ const allProducts = <?php echo json_encode($allProducts, JSON_UNESCAPED_UNICODE 
 const bannerMap = <?php echo json_encode($bannerMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 const promotionModal = document.getElementById('promotionModal');
+const editPromotionModal = document.getElementById('editPromotionModal');
 const bindProductsModal = document.getElementById('bindProductsModal');
 const bannerModal = document.getElementById('bannerModal');
 
+const createProductsList = document.getElementById('createProductsList');
+const editProductsList = document.getElementById('editProductsList');
+
 document.getElementById('openCreatePromotion').addEventListener('click', () => {
+	renderProductCheckboxesTo(createProductsList, new Set());
 	promotionModal.style.display = 'flex';
 });
 
 document.getElementById('closePromotionModal').addEventListener('click', () => {
 	promotionModal.style.display = 'none';
+});
+
+document.getElementById('closeEditPromotionModal').addEventListener('click', () => {
+	editPromotionModal.style.display = 'none';
 });
 
 document.getElementById('closeBindProductsModal').addEventListener('click', () => {
@@ -417,9 +518,46 @@ document.querySelectorAll('.js-upload-banner').forEach(btn => {
 	});
 });
 
-function renderProductCheckboxes(promotionId) {
-	const container = document.getElementById('bindProductsList');
-	const selected = new Set(promotionProducts[promotionId] || []);
+document.querySelectorAll('.js-edit-promotion').forEach(btn => {
+	btn.addEventListener('click', () => {
+		const promotionId = btn.dataset.id;
+		const promotionName = btn.dataset.name || '';
+		document.getElementById('editPromotionTitle').textContent = '編輯行銷活動 - ' + promotionName;
+		document.getElementById('edit_promotion_id').value = promotionId;
+		document.getElementById('edit_promotion_name').value = promotionName;
+		document.getElementById('edit_promotion_description').value = btn.dataset.description || '';
+		document.getElementById('edit_promotion_discount_type').value = btn.dataset.discountType || 'PERCENT';
+		document.getElementById('edit_promotion_discount_value').value = btn.dataset.discountValue || '';
+		document.getElementById('edit_promotion_start_at').value = btn.dataset.startAt || '';
+		document.getElementById('edit_promotion_end_at').value = btn.dataset.endAt || '';
+		document.getElementById('edit_promotion_active').value = btn.dataset.isActive || '1';
+
+		const selected = new Set(promotionProducts[promotionId] || []);
+		renderProductCheckboxesTo(editProductsList, selected);
+		updateDiscountMeta(document.getElementById('edit_promotion_discount_type'), document.getElementById('edit_promotion_discount_value'), document.getElementById('edit_promotion_discount_label'));
+
+		const preview = document.getElementById('editImagePreview');
+		preview.innerHTML = '';
+		if (btn.dataset.imageUrl) {
+			const img = document.createElement('img');
+			img.src = '../' + btn.dataset.imageUrl;
+			img.alt = '活動圖片';
+			img.style.width = '160px';
+			img.style.height = '90px';
+			img.style.objectFit = 'cover';
+			img.style.borderRadius = '8px';
+			img.style.border = '1px solid #e2e8f0';
+			preview.appendChild(img);
+		}
+
+		editPromotionModal.style.display = 'flex';
+	});
+});
+
+function renderProductCheckboxesTo(container, selected) {
+	if (!container) {
+		return;
+	}
 	container.innerHTML = '';
 
 	if (allProducts.length === 0) {
@@ -445,6 +583,27 @@ function renderProductCheckboxes(promotionId) {
 	});
 }
 
+function renderProductCheckboxes(promotionId) {
+	const container = document.getElementById('bindProductsList');
+	const selected = new Set(promotionProducts[promotionId] || []);
+	renderProductCheckboxesTo(container, selected);
+}
+
+function updateDiscountMeta(selectEl, inputEl, labelEl) {
+	if (!selectEl || !inputEl || !labelEl) {
+		return;
+	}
+	if (selectEl.value === 'PERCENT') {
+		labelEl.textContent = '折扣數值（百分比%）';
+		inputEl.placeholder = '例如：15';
+		inputEl.step = '0.01';
+		return;
+	}
+	labelEl.textContent = '折扣數值（折抵金額 NT$）';
+	inputEl.placeholder = '例如：200';
+	inputEl.step = '1';
+}
+
 function renderBannerPreview(promotionId) {
 	const preview = document.getElementById('bannerPreview');
 	preview.innerHTML = '';
@@ -463,7 +622,27 @@ function renderBannerPreview(promotionId) {
 
 window.addEventListener('click', (event) => {
 	if (event.target === promotionModal) promotionModal.style.display = 'none';
+	if (event.target === editPromotionModal) editPromotionModal.style.display = 'none';
 	if (event.target === bindProductsModal) bindProductsModal.style.display = 'none';
 	if (event.target === bannerModal) bannerModal.style.display = 'none';
 });
+
+const promotionDiscountType = document.getElementById('promotion_discount_type');
+const promotionDiscountValue = document.getElementById('promotion_discount_value');
+const promotionDiscountLabel = document.getElementById('promotion_discount_label');
+if (promotionDiscountType && promotionDiscountValue && promotionDiscountLabel) {
+	updateDiscountMeta(promotionDiscountType, promotionDiscountValue, promotionDiscountLabel);
+	promotionDiscountType.addEventListener('change', () => {
+		updateDiscountMeta(promotionDiscountType, promotionDiscountValue, promotionDiscountLabel);
+	});
+}
+
+const editDiscountType = document.getElementById('edit_promotion_discount_type');
+const editDiscountValue = document.getElementById('edit_promotion_discount_value');
+const editDiscountLabel = document.getElementById('edit_promotion_discount_label');
+if (editDiscountType && editDiscountValue && editDiscountLabel) {
+	editDiscountType.addEventListener('change', () => {
+		updateDiscountMeta(editDiscountType, editDiscountValue, editDiscountLabel);
+	});
+}
 </script>
