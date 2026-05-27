@@ -1,6 +1,6 @@
 <?php
-// actions/ToggleFeatured.php - 切换商品精選狀態
-
+// actions/ToggleFeatured.php - 切换商品精选状态
+require_once __DIR__ . '/../auth_guard.php';
 if ($action !== 'toggle_featured') {
     return;
 }
