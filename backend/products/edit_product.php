@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../auth_guard.php';
 // products/edit_product.php - 編輯商品頁面（置於子資料夾內）
-
+//版本1
 $product_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($product_id <= 0) {
     echo "<script>alert('無效的商品 ID'); location.href='backend.php?page=products';</script>";
@@ -141,7 +141,8 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                             <input class="pm-input" type="number" name="stock[]" min="0" step="1" required value="<?= intval($v['stock_available']) ?>">
                         </div>
                     </div>
-                    <div style="text-align:right; margin-top:10px;">
+                    <div style="text-align:right; margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+                        <button type="button" class="pm-btn pm-btn-sub pm-btn-sm copy-sku">複製此規格</button>
                         <button type="button" class="pm-btn pm-btn-danger pm-btn-sm remove-sku">移除此規格</button>
                     </div>
                 </div>

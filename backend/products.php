@@ -2,7 +2,7 @@
 require_once __DIR__ . '/auth_guard.php';
 // products.php - 商品管理主頁面（容器）
 // $conn 由 backend.php 提供
-
+//版本1
 function pmTableColumns($conn, $tableName) {
     $cols = [];
     $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -154,7 +154,7 @@ $isEditMode = (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_G
     <div class="pm-head">
         <div>
             <h1 class="pm-title">商品管理</h1>
-            <p class="pm-sub">支援搜尋篩選、批次上下架、快速編輯與多圖上傳。</p>
+            <p class="pm-sub"></p>
         </div>
         <div class="pm-tabs">
             <?php if ($isEditMode): ?>

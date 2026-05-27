@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../auth_guard.php';
 // products/create.php - 新增商品表單（純展示層）
 // 所有數據已由 products.php 準備好：$categories
+//版本1
 ?>
 
 <section class="pm-card" id="tab-create" style="display:none;">
@@ -85,6 +86,10 @@ require_once __DIR__ . '/../auth_guard.php';
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>
                             <input class="pm-input" type="number" name="stock[]" min="0" step="1" required placeholder="0">
                         </div>
+                    </div>
+                    <div style="text-align:right; margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+                        <button type="button" class="pm-btn pm-btn-sub pm-btn-sm copy-sku">複製此規格</button>
+                        <button type="button" class="pm-btn pm-btn-danger pm-btn-sm remove-sku">移除此規格</button>
                     </div>
                 </div>
             </div>

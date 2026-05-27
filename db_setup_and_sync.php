@@ -1,5 +1,6 @@
 <?php
-// db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本
+// db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本（每次改檔同步更新版本號）
+//版本2
 header("Content-Type: text/html; charset=utf-8");
 
 $host = "localhost";
@@ -17,6 +18,7 @@ $conn->query("CREATE DATABASE IF NOT EXISTS `$dbname` DEFAULT CHARACTER SET utf8
 $conn->select_db($dbname);
 
 echo "<h2>🚀 All Pass 專案 - 資料庫結構同步/初始化開始...</h2>";
+echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v2</p>";
 echo "<hr>";
 
 function columnExists($conn, $table, $column) {
@@ -170,7 +172,58 @@ $sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_order_items);
 
-echo "<p style='color:blue;'>📋 基本 11 張資料表結構已確認/建立完成。</p>";
+$sql_promotions = "CREATE TABLE IF NOT EXISTS `promotions` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(120) NOT NULL,
+    `description` TEXT NULL,
+    `discount_type` ENUM('PERCENT', 'AMOUNT') NOT NULL,
+    `discount_value` DECIMAL(10,2) NOT NULL,
+    `start_at` DATETIME NOT NULL,
+    `end_at` DATETIME NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    INDEX `idx_promotions_active` (`is_active`),
+    INDEX `idx_promotions_dates` (`start_at`, `end_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+if (!$conn->query($sql_promotions)) {
+    echo "<p style='color:red;'>❌ 建立 promotions 失敗：" . htmlspecialchars($conn->error) . "</p>";
+}
+
+$sql_promotion_products = "CREATE TABLE IF NOT EXISTS `promotion_products` (
+    `promotion_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    PRIMARY KEY (`promotion_id`, `product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+if ($conn->query($sql_promotion_products)) {
+    $conn->query("ALTER TABLE `promotion_products` ADD FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
+    $conn->query("ALTER TABLE `promotion_products` ADD FOREIGN KEY (`product_id`) REFERENCES `products`(`product_id`) ON DELETE CASCADE");
+} else {
+    echo "<p style='color:red;'>❌ 建立 promotion_products 失敗：" . htmlspecialchars($conn->error) . "</p>";
+}
+
+$sql_promotion_banners = "CREATE TABLE IF NOT EXISTS `promotion_banners` (
+    `promotion_id` INT NOT NULL,
+    `banner_image_url` VARCHAR(255) NOT NULL,
+    `is_show_on_homepage` TINYINT(1) NOT NULL DEFAULT 1,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`promotion_id`, `banner_image_url`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+if ($conn->query($sql_promotion_banners)) {
+    $conn->query("ALTER TABLE `promotion_banners` ADD FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
+} else {
+    echo "<p style='color:red;'>❌ 建立 promotion_banners 失敗：" . htmlspecialchars($conn->error) . "</p>";
+}
+
+// 驗證 promotions 相關表是否存在
+$checkPromoTables = $conn->query("SHOW TABLES LIKE 'promotion%'");
+if ($checkPromoTables) {
+    $found = [];
+    while ($row = $checkPromoTables->fetch_array()) {
+        $found[] = $row[0];
+    }
+    echo "<p style='color:gray;'>ℹ️ promotions 相關表：" . htmlspecialchars(implode(', ', $found)) . "</p>";
+}
+
+echo "<p style='color:blue;'>📋 基本 14 張資料表結構已確認/建立完成（含行銷活動相關表）。</p>";
 
 // === 延伸欄位同步檢查 ===
 
@@ -195,6 +248,20 @@ if (!columnExists($conn, 'products', 'warranty_info')) {
         echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `warranty_info` 欄位</p>";
     }
 // 追加 B: 多分類對應表 (product_category_links)
+}
+
+if (!columnExists($conn, 'orders', 'tracking_number')) {
+    $sql = "ALTER TABLE `orders` ADD COLUMN `tracking_number` VARCHAR(100) NULL AFTER `payment_method`";
+    if ($conn->query($sql)) {
+        echo "<p style='color:green;'>✅ 同步成功：已在 `orders` 追加 `tracking_number` 欄位</p>";
+    }
+}
+
+if (!columnExists($conn, 'orders', 'admin_notes')) {
+    $sql = "ALTER TABLE `orders` ADD COLUMN `admin_notes` TEXT NULL AFTER `tracking_number`";
+    if ($conn->query($sql)) {
+        echo "<p style='color:green;'>✅ 同步成功：已在 `orders` 追加 `admin_notes` 欄位</p>";
+    }
 }
 
 $sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
