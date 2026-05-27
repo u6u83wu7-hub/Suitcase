@@ -1,7 +1,6 @@
 <?php
+// actions/ToggleFeatured.php - 切换商品精选状态
 require_once __DIR__ . '/../auth_guard.php';
-// actions/ToggleFeatured.php - 切換商品精選狀態
-
 if ($action !== 'toggle_featured') {
     return;
 }
@@ -14,9 +13,6 @@ if ($productId <= 0 || !in_array($newFeatured, [0, 1], true)) {
 }
 
 $stmt = $conn->prepare("UPDATE products SET is_featured = ? WHERE product_id = ?");
-if (!$stmt) {
-    goProducts('資料庫錯誤: ' . $conn->error);
-}
 $stmt->bind_param("ii", $newFeatured, $productId);
 
 if ($stmt->execute()) {

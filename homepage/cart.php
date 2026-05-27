@@ -94,13 +94,27 @@ if (cartTableExists($conn, 'cart_items')) {
             COALESCE(v.original_price, 0) AS original_price,
             COALESCE(v.special_price, NULL) AS special_price,
             COALESCE(v.member_price, 0) AS member_price,
-            COALESCE((
-                SELECT pi.image_url
-                FROM product_images pi
-                WHERE pi.product_id = p.product_id
-                ORDER BY {$imageOrder}
-                LIMIT 1
-            ), '') AS image_url,
+            COALESCE(
+                (
+                    SELECT pi.image_url
+                    FROM product_images pi
+                    WHERE pi.product_id = p.product_id
+                      AND ci.variant_id IS NOT NULL
+                      AND v.color IS NOT NULL
+                      AND v.color <> ''
+                      AND pi.color = v.color
+                    ORDER BY {$imageOrder}
+                    LIMIT 1
+                ),
+                (
+                    SELECT pi.image_url
+                    FROM product_images pi
+                    WHERE pi.product_id = p.product_id
+                    ORDER BY {$imageOrder}
+                    LIMIT 1
+                ),
+                ''
+            ) AS image_url,
             COALESCE((
                 SELECT MIN(COALESCE(pv.special_price, pv.original_price))
                 FROM product_variants pv

@@ -103,7 +103,7 @@ require_once __DIR__ . '/../auth_guard.php';
                                 </td>
                                 <td>
                                     <!-- 點擊商品名稱進入編輯 -->
-                                    <a href="backend.php?page=edit_product&id=<?php echo intval($row['product_id']); ?>" class="pm-link">
+                                    <a href="backend.php?page=products&action=edit&id=<?php echo intval($row['product_id']); ?>" class="pm-link">
                                         <?php echo htmlspecialchars($row['name']); ?>
                                     </a>
                                 </td>
@@ -144,7 +144,7 @@ require_once __DIR__ . '/../auth_guard.php';
                                 <td>
                                     <div class="pm-actions">
                                         <!-- 編輯按鈕 -->
-                                        <a href="backend.php?page=edit_product&id=<?php echo intval($row['product_id']); ?>" class="pm-btn pm-btn-edit pm-btn-sm">編輯</a>
+                                        <a href="backend.php?page=products&action=edit&id=<?php echo intval($row['product_id']); ?>" class="pm-btn pm-btn-edit pm-btn-sm">編輯</a>
                                         
                                         <!-- 狀態切換 -->
                                         <form method="POST" action="backend_action.php" style="display:inline;">

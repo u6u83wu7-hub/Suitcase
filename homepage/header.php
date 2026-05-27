@@ -18,7 +18,7 @@ if (isset($_SESSION['user_id'])) {
         $headerConn->set_charset('utf8mb4');
         if (hpTableExists($headerConn, 'cart_items')) {
             $userId = intval($_SESSION['user_id']);
-            $badgeSql = "SELECT COALESCE(SUM(quantity), 0) AS total_qty FROM cart_items WHERE user_id = {$userId}";
+            $badgeSql = "SELECT COUNT(*) AS total_qty FROM cart_items WHERE user_id = {$userId}";
             $badgeRes = $headerConn->query($badgeSql);
             if ($badgeRes && $badgeRes->num_rows > 0) {
                 $badgeRow = $badgeRes->fetch_assoc();
