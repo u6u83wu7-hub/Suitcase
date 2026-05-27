@@ -1,7 +1,6 @@
 <?php
-require_once __DIR__ . '/../auth_guard.php';
 // actions/ToggleProductStatus.php - 切换商品上下架状态
-
+require_once __DIR__ . '/../auth_guard.php';
 if ($action !== 'toggle_product_status') {
     return;
 }
