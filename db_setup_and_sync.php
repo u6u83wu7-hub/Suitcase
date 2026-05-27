@@ -1,7 +1,10 @@
 <?php
 // db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本（每次改檔同步更新版本號）
-//版本2
+//版本4
 header("Content-Type: text/html; charset=utf-8");
+
+// 強制讓 MySQL 報錯，避免錯誤被隱藏
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 $host = "localhost";
 $user = "root";
@@ -18,12 +21,22 @@ $conn->query("CREATE DATABASE IF NOT EXISTS `$dbname` DEFAULT CHARACTER SET utf8
 $conn->select_db($dbname);
 
 echo "<h2>🚀 All Pass 專案 - 資料庫結構同步/初始化開始...</h2>";
-echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v2</p>";
+echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4</p>";
 echo "<hr>";
 
 function columnExists($conn, $table, $column) {
     $result = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
     return $result && $result->num_rows > 0;
+}
+
+function foreignKeyExists($conn, $table, $constraintName) {
+        $sql = "SELECT 1 FROM information_schema.REFERENTIAL_CONSTRAINTS
+                        WHERE CONSTRAINT_SCHEMA = DATABASE()
+                            AND TABLE_NAME = '{$table}'
+                            AND CONSTRAINT_NAME = '{$constraintName}'
+                        LIMIT 1";
+        $result = $conn->query($sql);
+        return $result && $result->num_rows > 0;
 }
 
 // 📁 表格 1：管理員 (admin_users)
@@ -194,8 +207,12 @@ $sql_promotion_products = "CREATE TABLE IF NOT EXISTS `promotion_products` (
     PRIMARY KEY (`promotion_id`, `product_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 if ($conn->query($sql_promotion_products)) {
-    $conn->query("ALTER TABLE `promotion_products` ADD FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
-    $conn->query("ALTER TABLE `promotion_products` ADD FOREIGN KEY (`product_id`) REFERENCES `products`(`product_id`) ON DELETE CASCADE");
+    if (!foreignKeyExists($conn, 'promotion_products', 'fk_promotion_products_promotion')) {
+        $conn->query("ALTER TABLE `promotion_products` ADD CONSTRAINT `fk_promotion_products_promotion` FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
+    }
+    if (!foreignKeyExists($conn, 'promotion_products', 'fk_promotion_products_product')) {
+        $conn->query("ALTER TABLE `promotion_products` ADD CONSTRAINT `fk_promotion_products_product` FOREIGN KEY (`product_id`) REFERENCES `products`(`product_id`) ON DELETE CASCADE");
+    }
 } else {
     echo "<p style='color:red;'>❌ 建立 promotion_products 失敗：" . htmlspecialchars($conn->error) . "</p>";
 }
@@ -208,7 +225,9 @@ $sql_promotion_banners = "CREATE TABLE IF NOT EXISTS `promotion_banners` (
     PRIMARY KEY (`promotion_id`, `banner_image_url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 if ($conn->query($sql_promotion_banners)) {
-    $conn->query("ALTER TABLE `promotion_banners` ADD FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
+    if (!foreignKeyExists($conn, 'promotion_banners', 'fk_promotion_banners_promotion')) {
+        $conn->query("ALTER TABLE `promotion_banners` ADD CONSTRAINT `fk_promotion_banners_promotion` FOREIGN KEY (`promotion_id`) REFERENCES `promotions`(`id`) ON DELETE CASCADE");
+    }
 } else {
     echo "<p style='color:red;'>❌ 建立 promotion_banners 失敗：" . htmlspecialchars($conn->error) . "</p>";
 }
