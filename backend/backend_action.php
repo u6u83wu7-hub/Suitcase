@@ -1,7 +1,7 @@
 <?php
 // backend_action.php - 统一路由器
 // 分發請求到各个 action 處理器
-
+//版本4
 require_once __DIR__ . '/auth_guard.php';
 
 // 資料庫連線
@@ -28,6 +28,20 @@ function goProducts($message = '') {
 function goCategories($message = '') {
     $safe = addslashes($message);
     echo "<script>" . ($message !== '' ? "alert('{$safe}');" : '') . "location.href='backend.php?page=categories';</script>";
+    exit();
+}
+
+function goMarketing($message = '', $extraParams = []) {
+    $params = ['page' => 'marketing'];
+    if ($message !== '') {
+        $params['error'] = $message;
+    }
+    if (is_string($extraParams) && $extraParams !== '') {
+        $params['open'] = $extraParams;
+    } elseif (is_array($extraParams) && !empty($extraParams)) {
+        $params = array_merge($params, $extraParams);
+    }
+    header('Location: backend.php?' . http_build_query($params));
     exit();
 }
 
@@ -62,6 +76,11 @@ $actions = [
     'bulk_update_products' => 'actions/BulkUpdateProducts.php',
     'delete_product' => 'actions/DeleteProduct.php',
     'update_order_status' => 'actions/UpdateOrderStatus.php',
+    'bulk_update_orders' => 'actions/UpdateOrderStatus.php',
+    'add_promotion' => 'actions/MarketingActions.php',
+    'update_promotion' => 'actions/MarketingActions.php',
+    'sync_promotion_products' => 'actions/MarketingActions.php',
+    'upload_promotion_banner' => 'actions/MarketingActions.php',
     'add_category' => 'actions/CategoryActions.php',
     'update_category' => 'actions/CategoryActions.php',
     'delete_category' => 'actions/CategoryActions.php',

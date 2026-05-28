@@ -184,7 +184,7 @@ if (!isset($activeNav)) {
                         <a href="#">便利前開款</a>
                     </div>
                 </div>
-                <a href="#" class="nav-text-link sale-link">SALE 優惠專區</a>
+                <a href="promotions.php" class="nav-text-link sale-link <?php echo $activeNav === 'promotions' ? 'is-active' : ''; ?>">SALE 優惠專區</a>
             </nav>
         </div>
     </header>

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/auth_guard.php';
-
+//categories.php
+//版本1
 // 1. 取得分類列表與數量
 $categories = [];
 $result = $conn->query(
@@ -81,7 +82,7 @@ if ($allRes) {
     <div class="category-grid">
         <div>
             <div class="category-card" style="margin-bottom: 20px;">
-                <h2>✨ 新增分類</h2>
+                <h2>新增分類</h2>
                 <form action="backend_action.php" method="POST">
                     <input type="hidden" name="action" value="add_category">
                     <label style="font-size:13px; font-weight:bold; color:#475569; display:block; margin-bottom:6px;">分類名稱</label>
@@ -91,7 +92,7 @@ if ($allRes) {
             </div>
 
             <div class="category-card">
-                <h2>✏️ 編輯分類</h2>
+                <h2>編輯分類</h2>
                 <form action="backend_action.php" method="POST" id="editCategoryForm">
                     <input type="hidden" name="action" value="update_category">
                     <input type="hidden" name="category_id" id="editCategoryId" value="">
@@ -106,7 +107,7 @@ if ($allRes) {
         </div>
 
         <div class="category-card">
-            <h2>📋 現有分類列表</h2>
+            <h2>現有分類列表</h2>
             <div class="pm-table-wrap">
                 <table class="pm-table" style="width:100%;">
                     <thead>

@@ -88,6 +88,14 @@ function checkoutEnsureOrderColumns($conn) {
 }
 
 checkoutEnsureOrderColumns($conn);
+$orderColumns = checkoutTableColumns($conn, 'orders');
+$hasShippingNotesColumn = in_array('shipping_notes', $orderColumns, true);
+$hasNoteColumn = in_array('note', $orderColumns, true);
+$orderItemColumns = checkoutTableColumns($conn, 'order_items');
+$hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
+$hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
+$hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
+$hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumns, true);
 
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
@@ -153,6 +161,16 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
             COALESCE(v.original_price, 0) AS original_price,
             COALESCE(v.special_price, NULL) AS special_price,
             COALESCE((
+                SELECT pi.image_url
+                FROM product_images pi
+                WHERE pi.product_id = p.product_id
+                  AND ci.variant_id IS NOT NULL
+                  AND v.color IS NOT NULL
+                  AND v.color <> ''
+                  AND pi.color = v.color
+                ORDER BY {$imageOrder}
+                LIMIT 1
+            ), (
                 SELECT pi.image_url
                 FROM product_images pi
                 WHERE pi.product_id = p.product_id
@@ -257,31 +275,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         try {
             $orderNumber = checkoutGenerateOrderNumber();
             $orderStatus = 'PENDING';
+            $combinedNote = trim($formAddressNote . (($formAddressNote !== '' && $formNote !== '') ? ' | ' : '') . $formNote);
 
-            $orderSql = "INSERT INTO orders (
-                order_number,
-                user_id,
-                status,
-                subtotal_amount,
-                shipping_fee,
-                total_amount,
-                recipient_name,
-                recipient_phone,
-                shipping_address,
-                payment_method,
-                cardholder_name,
-                card_brand,
-                card_last4,
-                card_expiry_month,
-                card_expiry_year,
-                note
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            $orderStmt = $conn->prepare($orderSql);
-            if (!$orderStmt) {
-                throw new RuntimeException('無法建立訂單語句。');
-            }
-            $orderStmt->bind_param(
-                'sisdddssssssssss',
+            $orderColumnsList = [
+                'order_number',
+                'user_id',
+                'status',
+                'subtotal_amount',
+                'shipping_fee',
+                'total_amount',
+                'recipient_name',
+                'recipient_phone',
+                'shipping_address',
+            ];
+            $orderValues = [
                 $orderNumber,
                 $userId,
                 $orderStatus,
@@ -291,81 +298,142 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $formRecipientName,
                 $formRecipientPhone,
                 $formShippingAddress,
-                $paymentMethod,
-                $formCardholderName,
-                $formCardBrand,
-                $formCardLast4,
-                $formExpiryMonth,
-                $formExpiryYear,
-                $formNote
-            );
+            ];
+            $orderTypes = 'sisdddsss';
+
+            if ($hasShippingNotesColumn) {
+                $orderColumnsList[] = 'shipping_notes';
+                $orderValues[] = $formAddressNote;
+                $orderTypes .= 's';
+            }
+
+            $orderColumnsList[] = 'payment_method';
+            $orderColumnsList[] = 'cardholder_name';
+            $orderColumnsList[] = 'card_brand';
+            $orderColumnsList[] = 'card_last4';
+            $orderColumnsList[] = 'card_expiry_month';
+            $orderColumnsList[] = 'card_expiry_year';
+            $orderValues[] = $paymentMethod;
+            $orderValues[] = $formCardholderName;
+            $orderValues[] = $formCardBrand;
+            $orderValues[] = $formCardLast4;
+            $orderValues[] = $formExpiryMonth;
+            $orderValues[] = $formExpiryYear;
+            $orderTypes .= 'ssssss';
+
+            if ($hasNoteColumn) {
+                $orderColumnsList[] = 'note';
+                $orderValues[] = $hasShippingNotesColumn ? $formNote : $combinedNote;
+                $orderTypes .= 's';
+            } elseif (!$hasShippingNotesColumn) {
+                // If the legacy table has neither note column, we still keep the extra text locally.
+            }
+
+            $orderSql = 'INSERT INTO orders (' . implode(', ', $orderColumnsList) . ') VALUES (' . implode(', ', array_fill(0, count($orderColumnsList), '?')) . ')';
+            $orderStmt = $conn->prepare($orderSql);
+            if (!$orderStmt) {
+                throw new RuntimeException('無法建立訂單語句。');
+            }
+            $bindValues = [$orderTypes];
+            foreach ($orderValues as $index => $value) {
+                $bindValues[] = &$orderValues[$index];
+            }
+            call_user_func_array([$orderStmt, 'bind_param'], $bindValues);
             if (!$orderStmt->execute()) {
                 throw new RuntimeException('訂單寫入失敗。');
             }
             $orderId = intval($conn->insert_id);
             $orderStmt->close();
 
-            $itemSqlWithVariant = "INSERT INTO order_items (
-                order_id,
-                product_id,
-                variant_id,
-                product_name,
-                variant_name,
-                quantity,
-                unit_price,
-                subtotal_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-            $itemSqlWithoutVariant = "INSERT INTO order_items (
-                order_id,
-                product_id,
-                product_name,
-                variant_name,
-                quantity,
-                unit_price,
-                subtotal_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            $itemColumns = ['order_id'];
+            $itemPlaceholders = ['?'];
+            $itemTypes = 'i';
+
+            if ($hasOrderItemProductIdColumn) {
+                $itemColumns[] = 'product_id';
+                $itemPlaceholders[] = '?';
+                $itemTypes .= 'i';
+            }
+
+            $itemColumns[] = 'variant_id';
+            $itemColumns[] = 'product_name';
+            $itemColumns[] = 'sku_code';
+            $itemColumns[] = 'color';
+            $itemColumns[] = 'size_inches';
+            $itemColumns[] = 'quantity';
+            $itemColumns[] = 'locked_price';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemPlaceholders[] = '?';
+            $itemTypes .= 'issssid';
+
+            if ($hasOrderItemVariantNameColumn) {
+                $itemColumns[] = 'variant_name';
+                $itemPlaceholders[] = '?';
+                $itemTypes .= 's';
+            }
+
+            if ($hasOrderItemUnitPriceColumn) {
+                $itemColumns[] = 'unit_price';
+                $itemPlaceholders[] = '?';
+                $itemTypes .= 'd';
+            }
+
+            if ($hasOrderItemSubtotalAmountColumn) {
+                $itemColumns[] = 'subtotal_amount';
+                $itemPlaceholders[] = '?';
+                $itemTypes .= 'd';
+            }
+
+            $itemSql = 'INSERT INTO order_items (' . implode(', ', $itemColumns) . ') VALUES (' . implode(', ', $itemPlaceholders) . ')';
 
             foreach ($items as $item) {
                 $quantity = intval($item['quantity']);
                 $unitPrice = floatval($item['display_price']);
-                $subtotal = $unitPrice * $quantity;
-                $variantName = trim(($item['variant_size'] !== '' ? $item['variant_size'] . '吋' : '') . (($item['variant_color'] !== '' && $item['variant_size'] !== '') ? ' / ' : '') . ($item['variant_color'] !== '' ? $item['variant_color'] : ''));
+                $skuCode = trim((string)$item['sku_code']);
+                $variantColor = trim((string)$item['variant_color']);
+                $variantSize = trim((string)$item['variant_size']);
+                $variantName = trim(($variantSize !== '' ? $variantSize . '吋' : '') . (($variantColor !== '' && $variantSize !== '') ? ' / ' : '') . ($variantColor !== '' ? $variantColor : ''));
                 $variantId = intval($item['variant_id']);
+                $lockedPrice = $unitPrice;
+                $productId = intval($item['product_id']);
+                $subtotalAmount = $lockedPrice * $quantity;
 
-                if ($variantId > 0) {
-                    $itemStmt = $conn->prepare($itemSqlWithVariant);
-                    if (!$itemStmt) {
-                        throw new RuntimeException('無法建立訂單明細語句。');
-                    }
-                    $productId = intval($item['product_id']);
-                    $itemStmt->bind_param(
-                        'iiissidd',
-                        $orderId,
-                        $productId,
-                        $variantId,
-                        $item['product_name'],
-                        $variantName,
-                        $quantity,
-                        $unitPrice,
-                        $subtotal
-                    );
-                } else {
-                    $itemStmt = $conn->prepare($itemSqlWithoutVariant);
-                    if (!$itemStmt) {
-                        throw new RuntimeException('無法建立訂單明細語句。');
-                    }
-                    $productId = intval($item['product_id']);
-                    $itemStmt->bind_param(
-                        'iissidd',
-                        $orderId,
-                        $productId,
-                        $item['product_name'],
-                        $variantName,
-                        $quantity,
-                        $unitPrice,
-                        $subtotal
-                    );
+                $itemValues = [$orderId];
+                if ($hasOrderItemProductIdColumn) {
+                    $itemValues[] = $productId;
                 }
+                $itemValues[] = $variantId;
+                $itemValues[] = $item['product_name'];
+                $itemValues[] = $skuCode;
+                $itemValues[] = $variantColor;
+                $itemValues[] = $variantSize;
+                $itemValues[] = $quantity;
+                $itemValues[] = $lockedPrice;
+                if ($hasOrderItemVariantNameColumn) {
+                    $itemValues[] = $variantName;
+                }
+                if ($hasOrderItemUnitPriceColumn) {
+                    $itemValues[] = $unitPrice;
+                }
+                if ($hasOrderItemSubtotalAmountColumn) {
+                    $itemValues[] = $subtotalAmount;
+                }
+
+                $itemStmt = $conn->prepare($itemSql);
+                if (!$itemStmt) {
+                    throw new RuntimeException('無法建立訂單明細語句。');
+                }
+
+                $bindValues = [$itemTypes];
+                foreach ($itemValues as $index => $value) {
+                    $bindValues[] = &$itemValues[$index];
+                }
+                call_user_func_array([$itemStmt, 'bind_param'], $bindValues);
 
                 if (!$itemStmt->execute()) {
                     throw new RuntimeException('訂單明細寫入失敗。');
