@@ -85,6 +85,29 @@ function tableColumns($conn, $tableName) {
     return $cols;
 }
 
+function formatSizeLabel($size) {
+    $value = trim((string)$size);
+    if ($value === '') {
+        return '';
+    }
+
+    if (preg_match('/\d+/', $value, $matches)) {
+        $inches = intval($matches[0]);
+        if ($inches <= 20) {
+            return 'S';
+        }
+        if ($inches <= 23) {
+            return 'M';
+        }
+        if ($inches <= 26) {
+            return 'L';
+        }
+        return 'XL';
+    }
+
+    return strtoupper($value);
+}
+
 // 取得商品主檔
 $productCols = tableColumns($conn, 'products');
 $productSelect = [
@@ -175,6 +198,8 @@ $defaultVariant = $variants[0] ?? null;
 foreach ($variants as $v) {
     $variantId = intval($v['variant_id']);
     $variantColor = trim((string)($v['color'] ?? ''));
+    $variantSize = trim((string)($v['size_inches'] ?? ''));
+    $variantSizeLabel = formatSizeLabel($variantSize);
     $variantImage = null;
     if ($variantColor !== '' && isset($colorImageMap[$variantColor])) {
         $variantImage = $colorImageMap[$variantColor];
@@ -185,7 +210,8 @@ foreach ($variants as $v) {
     $variantMap[$variantId] = [
         'variant_id' => $variantId,
         'sku_code' => (string)($v['sku_code'] ?? ''),
-        'size_inches' => (string)($v['size_inches'] ?? ''),
+        'size_inches' => $variantSize,
+        'size_label' => $variantSizeLabel,
         'color' => $variantColor,
         'original_price' => isset($v['original_price']) ? floatval($v['original_price']) : 0,
         'special_price' => ($v['special_price'] !== null && $v['special_price'] !== '') ? floatval($v['special_price']) : null,
@@ -221,6 +247,77 @@ $defaultDisplayPrice = $defaultVariantData
     : null;
 
 $variantPayload = array_values($variantMap);
+
+$colorOptions = [];
+$sizeOptions = [];
+foreach ($variantMap as $variant) {
+    $color = trim((string)($variant['color'] ?? ''));
+    $size = trim((string)($variant['size_inches'] ?? ''));
+    $sizeLabel = trim((string)($variant['size_label'] ?? ''));
+    $stock = intval($variant['stock_available'] ?? 0);
+    if ($color !== '') {
+        if (!isset($colorOptions[$color])) {
+            $colorOptions[$color] = [
+                'label' => $color,
+                'image_url' => $variant['image_url'] ?? '',
+                'in_stock' => $stock > 0,
+            ];
+        } else {
+            if ($stock > 0) {
+                $colorOptions[$color]['in_stock'] = true;
+            }
+            if ($colorOptions[$color]['image_url'] === '' && ($variant['image_url'] ?? '') !== '') {
+                $colorOptions[$color]['image_url'] = $variant['image_url'];
+            }
+        }
+    }
+    if ($sizeLabel !== '') {
+        if (!isset($sizeOptions[$sizeLabel])) {
+            $sizeOptions[$sizeLabel] = [
+                'label' => $sizeLabel,
+                'display' => $size,
+                'in_stock' => $stock > 0,
+            ];
+        } elseif ($stock > 0) {
+            $sizeOptions[$sizeLabel]['in_stock'] = true;
+        }
+    }
+}
+
+$defaultColor = $defaultVariantData['color'] ?? '';
+$defaultSizeLabel = $defaultVariantData['size_label'] ?? '';
+$defaultSizeDisplay = $defaultVariantData['size_inches'] ?? '';
+
+$defaultOriginalPrice = $defaultVariantData ? floatval($defaultVariantData['original_price']) : null;
+$defaultSpecialPrice = ($defaultVariantData && $defaultVariantData['special_price'] !== null && $defaultVariantData['special_price'] !== '')
+    ? floatval($defaultVariantData['special_price'])
+    : null;
+$defaultMemberPrice = ($defaultVariantData && $defaultVariantData['member_price'] !== null && $defaultVariantData['member_price'] !== '')
+    ? floatval($defaultVariantData['member_price'])
+    : null;
+
+$defaultHeadlinePrice = $defaultOriginalPrice;
+$defaultHeadlineLabel = '售價';
+if ($defaultOriginalPrice !== null) {
+    if ($isMemberUser) {
+        $candidates = [$defaultOriginalPrice];
+        if ($defaultSpecialPrice !== null) {
+            $candidates[] = $defaultSpecialPrice;
+        }
+        if ($defaultMemberPrice !== null) {
+            $candidates[] = $defaultMemberPrice;
+        }
+        $defaultHeadlinePrice = min($candidates);
+        if ($defaultMemberPrice !== null && abs($defaultHeadlinePrice - $defaultMemberPrice) < 0.0001) {
+            $defaultHeadlineLabel = '會員價';
+        } elseif ($defaultSpecialPrice !== null && abs($defaultHeadlinePrice - $defaultSpecialPrice) < 0.0001) {
+            $defaultHeadlineLabel = '特價';
+        }
+    } elseif ($defaultSpecialPrice !== null && $defaultSpecialPrice < $defaultOriginalPrice) {
+        $defaultHeadlinePrice = $defaultSpecialPrice;
+        $defaultHeadlineLabel = '特價';
+    }
+}
 
 // 加入購物車：寫入 cart_items（存在則累加數量）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_to_cart') {
@@ -358,15 +455,14 @@ if (tableExists($conn, 'categories') && tableExists($conn, 'product_category_lin
 include 'header.php';
 ?>
 
-<section style="padding:120px 5%; max-width:1100px; margin:0 auto;">
-    <a href="index.php" style="color:#555; display:inline-block; margin-bottom:18px;">⬅️ 回首頁</a>
-    <div style="display:flex; gap:40px; align-items:flex-start;">
-        <div style="flex:1; max-width:560px;">
+<link rel="stylesheet" href="../css/product_detail.css">
+<main class="detail-page">
+    <a href="index.php" class="back-link">回首頁</a>
+    <section class="detail-wrap">
+        <div class="detail-gallery">
             <?php if (!empty($imgs)): ?>
-                <div style="border:1px solid #eee; padding:12px; background:#fff;">
-                    <img id="mainImg" src="<?php echo htmlspecialchars($defaultImageUrl !== '' ? $defaultImageUrl : '../' . ltrim($imgs[0]['image_url'], '/')); ?>" alt="<?php echo htmlspecialchars($product['name']); ?>" style="width:100%; height:auto; object-fit:cover;">
-                </div>
-                <div id="thumbList" style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+                <img id="mainImg" class="detail-main-image" src="<?php echo htmlspecialchars($defaultImageUrl !== '' ? $defaultImageUrl : '../' . ltrim($imgs[0]['image_url'], '/')); ?>" alt="<?php echo htmlspecialchars($product['name']); ?>">
+                <div id="thumbList" class="detail-thumbs">
                     <?php foreach ($imgs as $im): ?>
                         <?php
                             $thumbSrc = '../' . ltrim($im['image_url'], '/');
@@ -379,45 +475,53 @@ include 'header.php';
                             data-image-url="<?php echo htmlspecialchars($thumbSrc); ?>"
                             data-color="<?php echo htmlspecialchars($thumbColor); ?>"
                             data-is-default="<?php echo $thumbMatchesDefault ? '1' : '0'; ?>"
-                            style="width:80px; height:80px; object-fit:cover; border:1px solid #ddd; cursor:pointer;"
                         >
                     <?php endforeach; ?>
                 </div>
             <?php else: ?>
-                <div style="border:1px solid #eee; padding:60px; text-align:center; color:#999;">暫無圖片</div>
+                <div class="detail-image-placeholder">暫無圖片</div>
             <?php endif; ?>
         </div>
-        <div style="flex:1;">
-            <h1 style="font-size:28px; margin-bottom:8px;"><?php echo htmlspecialchars($product['name']); ?></h1>
-            <div style="color:#777; margin-bottom:12px;">狀態：<?php echo htmlspecialchars($product['status']); ?>　｜　上架時間：<?php echo htmlspecialchars($product['created_at']); ?></div>
+        <div class="detail-info">
+            <?php if (!empty($categories)): ?>
+                <div class="detail-category"><?php echo htmlspecialchars($categories[0]['name']); ?></div>
+            <?php else: ?>
+                <div class="detail-category">All Pass</div>
+            <?php endif; ?>
+            <h1><?php echo htmlspecialchars($product['name']); ?></h1>
 
-            <div style="font-size:22px; font-weight:700; color:#222; margin-bottom:16px;">
-                <?php
-                if ($defaultDisplayPrice !== null) {
-                    echo '<span id="headlinePrice">NT$ ' . number_format($defaultDisplayPrice) . '</span>';
-                } else {
-                    $displayPrice = null;
-                    foreach ($variants as $v) {
-                        $p = ($isMemberUser && $v['member_price'] !== null && $v['member_price'] !== '')
-                            ? floatval($v['member_price'])
-                            : (($v['special_price'] !== null && $v['special_price'] !== '') ? floatval($v['special_price']) : floatval($v['original_price']));
-                        if ($displayPrice === null || $p < $displayPrice) $displayPrice = $p;
-                    }
-                    if ($displayPrice !== null) echo '<span id="headlinePrice">NT$ ' . number_format($displayPrice) . '</span>';
-                    else echo '<span id="headlinePrice">價格：尚未設定</span>';
-                }
-                ?>
+            <div class="price-stack">
+                <div id="priceOriginalRow" class="price-line<?php echo ($defaultHeadlineLabel === '售價') ? ' is-hidden' : ''; ?>">
+                    <span>原價</span>
+                    <span id="priceOriginal"><?php echo $defaultOriginalPrice !== null ? 'NT$ ' . number_format($defaultOriginalPrice) : '--'; ?></span>
+                </div>
+                <div id="priceMemberRow" class="price-line<?php echo ($defaultHeadlineLabel === '會員價' || $defaultMemberPrice === null) ? ' is-hidden' : ''; ?>">
+                    <span>會員價</span>
+                    <span id="priceMember"><?php echo $defaultMemberPrice !== null ? 'NT$ ' . number_format($defaultMemberPrice) : '--'; ?></span>
+                </div>
+                <div id="priceSpecialRow" class="price-line<?php echo ($defaultHeadlineLabel === '特價' || $defaultSpecialPrice === null) ? ' is-hidden' : ''; ?>">
+                    <span>特價</span>
+                    <span id="priceSpecial"><?php echo $defaultSpecialPrice !== null ? 'NT$ ' . number_format($defaultSpecialPrice) : '--'; ?></span>
+                </div>
             </div>
-            <div id="priceHint" style="margin-top:-6px; margin-bottom:14px; color:#777; font-size:14px; line-height:1.6;">
+            <div class="price-main">
+                <span id="priceLabel" class="price-tag"><?php echo htmlspecialchars($defaultHeadlineLabel); ?></span>
+                <span id="headlinePrice" class="price-amount"><?php echo $defaultHeadlinePrice !== null ? 'NT$ ' . number_format($defaultHeadlinePrice) : '尚未設定'; ?></span>
+            </div>
+            <div id="priceHint" class="price-note">
                 <?php if ($defaultVariantData): ?>
                     <?php if ($isMemberUser): ?>
-                        <?php if ($defaultMemberPrice !== null): ?>
-                            您目前是會員，已顯示會員價。
+                        <?php if ($defaultMemberPrice !== null && $defaultHeadlineLabel === '會員價'): ?>
+                            您已享有專屬會員最優惠。
+                        <?php elseif ($defaultMemberPrice !== null): ?>
+                            會員價仍可使用：NT$ <?php echo number_format($defaultMemberPrice); ?>
                         <?php else: ?>
-                            您目前是會員，已顯示目前可用價格。
+                            已顯示目前可用最優惠價格。
                         <?php endif; ?>
                     <?php else: ?>
-                        <?php if ($defaultMemberPrice !== null): ?>
+                        <?php if ($defaultSpecialPrice !== null && $defaultSpecialPrice < $defaultOriginalPrice): ?>
+                            活動特惠價：NT$ <?php echo number_format($defaultSpecialPrice); ?>
+                        <?php elseif ($defaultMemberPrice !== null): ?>
                             加入會員即可使用會員價：NT$ <?php echo number_format($defaultMemberPrice); ?>
                         <?php else: ?>
                             加入會員即可查看會員價。
@@ -427,290 +531,102 @@ include 'header.php';
             </div>
 
             <?php if ($cartNotice !== ''): ?>
-                <div style="margin-bottom:14px; padding:10px 12px; border-radius:8px; <?php echo $cartNoticeType === 'success' ? 'background:#ecfdf5;color:#166534;border:1px solid #86efac;' : 'background:#fef2f2;color:#991b1b;border:1px solid #fca5a5;'; ?>">
-                    <?php echo htmlspecialchars($cartNotice); ?>
+                <div class="detail-alert"><?php echo htmlspecialchars($cartNotice); ?></div>
+            <?php endif; ?>
+
+            <?php if (!empty($colorOptions)): ?>
+                <div class="chip-group">
+                    <span class="chip-label">顏色</span>
+                    <div class="chip-row" id="colorOptions">
+                        <?php foreach ($colorOptions as $color => $opt): ?>
+                            <button
+                                type="button"
+                                class="chip color-chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultColor === $color) ? ' is-selected' : ''; ?>"
+                                data-color-option="<?php echo htmlspecialchars($color); ?>"
+                                data-image-url="<?php echo htmlspecialchars($opt['image_url']); ?>"
+                                title="<?php echo htmlspecialchars($color); ?>"
+                                <?php echo $opt['in_stock'] ? '' : 'disabled'; ?>
+                            >
+                                <span class="color-swatch" data-color="<?php echo htmlspecialchars($color); ?>"></span>
+                                <span class="visually-hidden"><?php echo htmlspecialchars($color); ?></span>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
                 </div>
             <?php endif; ?>
 
-            <div style="display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap;">
-                <button
-                    type="button"
-                    style="padding:10px 18px; border:1px solid #db6b6b; background:#fff; color:#db6b6b; border-radius:999px; font-weight:700; cursor:pointer;"
-                    onclick="alert('已加入收藏');"
-                >
-                    收藏
+            <?php if (!empty($sizeOptions)): ?>
+                <div class="chip-group">
+                    <span class="chip-label">尺寸</span>
+                    <div class="chip-row" id="sizeOptions">
+                        <?php foreach ($sizeOptions as $sizeLabel => $opt): ?>
+                            <button
+                                type="button"
+                                class="chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultSizeLabel === $sizeLabel) ? ' is-selected' : ''; ?>"
+                                data-size-option="<?php echo htmlspecialchars($sizeLabel); ?>"
+                                data-size-display="<?php echo htmlspecialchars($opt['display']); ?>"
+                                title="<?php echo htmlspecialchars($opt['display']); ?>"
+                                <?php echo $opt['in_stock'] ? '' : 'disabled'; ?>
+                            >
+                                <?php echo htmlspecialchars($opt['label']); ?>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <form method="post" id="cartForm" class="detail-actions">
+                <input type="hidden" name="action" value="add_to_cart">
+                <input type="hidden" name="variant_id" id="variantIdInput" value="<?php echo $defaultVariantId; ?>">
+                <input type="number" name="quantity" id="quantityInput" min="1" value="1" class="qty-input">
+                <button type="submit" class="detail-btn">加入購物車</button>
+                <button type="button" class="ghost-btn favorite-btn" id="favoriteBtn" aria-pressed="false" aria-label="加入收藏">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 21s-6.7-4.35-9.33-8.05C-0.2 9.6 1.2 5.6 4.6 4.4c2.2-.8 4.5 0 6 1.8 1.5-1.8 3.8-2.6 6-1.8 3.4 1.2 4.8 5.2 1.93 8.55C18.7 16.65 12 21 12 21z" />
+                    </svg>
                 </button>
-                <form method="post" id="cartForm" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0;">
-                    <input type="hidden" name="action" value="add_to_cart">
-                    <input type="hidden" name="variant_id" id="variantIdInput" value="<?php echo $defaultVariantId; ?>">
-
-                    <?php if (!empty($variants)): ?>
-                        <select id="variantSelect" style="height:40px; border:1px solid #ddd; border-radius:8px; padding:0 10px;">
-                            <?php foreach ($variants as $v): ?>
-                                <?php
-                                    $optId = intval($v['variant_id']);
-                                    $optPrice = ($v['special_price'] !== null && $v['special_price'] !== '') ? floatval($v['special_price']) : floatval($v['original_price']);
-                                    $optColor = trim((string)($v['color'] ?? ''));
-                                    $optSize = trim((string)($v['size_inches'] ?? ''));
-                                ?>
-                                <option
-                                    value="<?php echo $optId; ?>"
-                                    data-variant-id="<?php echo $optId; ?>"
-                                    data-sku-code="<?php echo htmlspecialchars($v['sku_code']); ?>"
-                                    data-size="<?php echo htmlspecialchars($optSize); ?>"
-                                    data-color="<?php echo htmlspecialchars($optColor); ?>"
-                                    data-price="<?php echo htmlspecialchars(number_format($optPrice, 2, '.', '')); ?>"
-                                    data-stock="<?php echo intval($v['stock_available']); ?>"
-                                    data-image-url="<?php echo htmlspecialchars($variantMap[$optId]['image_url'] ?? ''); ?>"
-                                >
-                                    <?php echo htmlspecialchars(($v['size_inches'] !== '' ? $v['size_inches'] : '尺寸未設定') . ' / ' . ($v['color'] !== '' ? $v['color'] : '顏色未設定')); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    <?php endif; ?>
-
-                    <input type="number" name="quantity" id="quantityInput" min="1" value="1" style="width:76px; height:40px; border:1px solid #ddd; border-radius:8px; padding:0 10px;">
-                    <button
-                        type="submit"
-                        style="padding:10px 18px; border:1px solid #db6b6b; background:#db6b6b; color:#fff; border-radius:999px; font-weight:700; cursor:pointer;"
-                    >
-                        加入購物車
-                    </button>
-                </form>
+            </form>
+            <div class="sticky-actions">
+                <input type="number" id="quantityInputMobile" min="1" value="1" class="qty-input">
+                <button type="submit" form="cartForm" class="detail-btn">加入購物車</button>
             </div>
 
-            <?php if (!empty($categories)): ?>
-                <div style="margin-bottom:12px;">分類：
-                    <?php foreach ($categories as $c) echo '<span style="background:#f3f3f3;padding:6px 8px;border-radius:6px;margin-right:6px;">' . htmlspecialchars($c['name']) . '</span>'; ?>
-                </div>
-            <?php endif; ?>
-
-            <div style="margin-bottom:18px; color:#444; line-height:1.8;"><?php echo nl2br(htmlspecialchars($product['description'])); ?></div>
-
-            <?php if (!empty($variants)): ?>
-                <h3 style="margin-top:10px;">SKU 列表</h3>
-                <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                    <thead>
-                        <tr style="text-align:left; border-bottom:1px solid #eee; color:#666;"><th>SKU</th><th>尺寸</th><th>顏色</th><th>價格</th><th>庫存</th></tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($variants as $v): ?>
-                            <tr>
-                                <td style="padding:8px 6px;"><?php echo htmlspecialchars($v['sku_code']); ?></td>
-                                <td style="padding:8px 6px;"><?php echo htmlspecialchars($v['size_inches']); ?></td>
-                                <td style="padding:8px 6px;"><?php echo htmlspecialchars($v['color']); ?></td>
-                                <td style="padding:8px 6px;">
-                                    <?php
-                                        $listPrice = ($isMemberUser && $v['member_price'] !== null && $v['member_price'] !== '')
-                                            ? floatval($v['member_price'])
-                                            : (($v['special_price'] !== null && $v['special_price'] !== '') ? floatval($v['special_price']) : floatval($v['original_price']));
-                                        echo 'NT$ ' . number_format($listPrice);
-                                    ?>
-                                </td>
-                                <td style="padding:8px 6px;"><?php echo intval($v['stock_available']); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
-
-            <div style="margin-top:18px; padding:16px; border:1px solid #eee; border-radius:14px; background:#fafafa;">
+            <div class="detail-info-box">
                 <h3 style="margin:0 0 12px;">目前選擇的商品資訊</h3>
                 <div style="display:grid; gap:8px; color:#444; line-height:1.7;">
-                    <div>SKU：<span id="selectedSku"><?php echo htmlspecialchars($defaultVariantData['sku_code'] ?? '未選擇'); ?></span></div>
-                    <div>尺寸：<span id="selectedSize"><?php echo htmlspecialchars($defaultVariantData['size_inches'] ?? '未設定'); ?></span></div>
+                    <div>尺寸：<span id="selectedSize"><?php echo htmlspecialchars($defaultSizeLabel !== '' ? $defaultSizeLabel . ($defaultSizeDisplay !== '' ? ' (' . $defaultSizeDisplay . ')' : '') : '未設定'); ?></span></div>
                     <div>顏色：<span id="selectedColor"><?php echo htmlspecialchars($defaultVariantData['color'] ?? '未設定'); ?></span></div>
-                    <div>單價：<span id="selectedPrice"><?php echo $defaultPrice !== null ? 'NT$ ' . number_format($defaultPrice) : '尚未設定'; ?></span></div>
-                    <div>小計：<span id="selectedSubtotal"><?php echo $defaultPrice !== null ? 'NT$ ' . number_format($defaultPrice) : '尚未設定'; ?></span></div>
+                    <div>單價：<span id="selectedPrice"><?php echo $defaultHeadlinePrice !== null ? 'NT$ ' . number_format($defaultHeadlinePrice) : '尚未設定'; ?></span></div>
+                    <div>小計：<span id="selectedSubtotal"><?php echo $defaultHeadlinePrice !== null ? 'NT$ ' . number_format($defaultHeadlinePrice) : '尚未設定'; ?></span></div>
                     <div>庫存：<span id="selectedStock"><?php echo htmlspecialchars((string)($defaultVariantData['stock_available'] ?? '0')); ?></span></div>
                 </div>
             </div>
 
-            <?php if (!empty($product['warranty_months'])): ?>
-                <div style="margin-top:16px; color:#555;">保固：<?php echo intval($product['warranty_months']); ?> 個月</div>
+            <?php if (!empty($product['description'])): ?>
+                <section class="detail-copy">
+                    <h2>商品描述</h2>
+                    <p><?php echo nl2br(htmlspecialchars($product['description'])); ?></p>
+                </section>
             <?php endif; ?>
 
+            <?php if (!empty($product['warranty_months'])): ?>
+                <section class="detail-copy">
+                    <h2>保固資訊</h2>
+                    <p><?php echo intval($product['warranty_months']); ?> 個月</p>
+                </section>
+            <?php endif; ?>
         </div>
-    </div>
-</section>
+    </section>
+</main>
+
+<div id="toast" class="toast"></div>
 
 <script>
-const variantData = <?php echo json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
-const variantSelect = document.getElementById('variantSelect');
-const variantIdInput = document.getElementById('variantIdInput');
-const mainImg = document.getElementById('mainImg');
-const selectedSku = document.getElementById('selectedSku');
-const selectedSize = document.getElementById('selectedSize');
-const selectedColor = document.getElementById('selectedColor');
-const selectedPrice = document.getElementById('selectedPrice');
-const selectedSubtotal = document.getElementById('selectedSubtotal');
-const selectedStock = document.getElementById('selectedStock');
-const headlinePrice = document.getElementById('headlinePrice');
-const priceHint = document.getElementById('priceHint');
-const thumbList = document.getElementById('thumbList');
-const quantityInput = document.getElementById('quantityInput');
-const isMemberUser = <?php echo $isMemberUser ? 'true' : 'false'; ?>;
-
-function formatPrice(value) {
-    const number = Number(value);
-    if (Number.isNaN(number)) {
-        return '尚未設定';
-    }
-    return 'NT$ ' + number.toLocaleString('zh-TW');
-}
-
-function findVariant(variantId) {
-    const normalizedId = String(variantId || '');
-    return variantData.find(item => String(item.variant_id) === normalizedId) || null;
-}
-
-function getVariantUnitPrice(variant) {
-    if (!variant) {
-        return null;
-    }
-
-    if (isMemberUser && variant.member_price !== null && variant.member_price !== '') {
-        return Number(variant.member_price);
-    }
-
-    if (variant.special_price !== null && variant.special_price !== '') {
-        return Number(variant.special_price);
-    }
-
-    return Number(variant.original_price);
-}
-
-function getVariantMemberPrice(variant) {
-    if (!variant || variant.member_price === null || variant.member_price === '') {
-        return null;
-    }
-
-    return Number(variant.member_price);
-}
-
-function updateSubtotal() {
-    if (!selectedSubtotal) {
-        return;
-    }
-
-    const variantId = variantIdInput ? variantIdInput.value : '';
-    const variant = findVariant(variantId);
-    const unitPrice = getVariantUnitPrice(variant);
-    const quantity = quantityInput ? Math.max(1, parseInt(quantityInput.value || '1', 10) || 1) : 1;
-
-    if (variant && unitPrice !== null && !Number.isNaN(unitPrice)) {
-        selectedSubtotal.textContent = formatPrice(unitPrice * quantity);
-    } else {
-        selectedSubtotal.textContent = '尚未設定';
-    }
-}
-
-function applyVariant(variantId, imageUrl) {
-    const variant = findVariant(variantId);
-    if (!variant) {
-        return;
-    }
-
-    if (variantSelect) {
-        variantSelect.value = String(variant.variant_id);
-    }
-    if (variantIdInput) {
-        variantIdInput.value = String(variant.variant_id);
-    }
-
-    if (selectedSku) {
-        selectedSku.textContent = variant.sku_code || '未設定';
-    }
-    if (selectedSize) {
-        selectedSize.textContent = variant.size_inches || '未設定';
-    }
-    if (selectedColor) {
-        selectedColor.textContent = variant.color || '未設定';
-    }
-    if (selectedPrice) {
-        const priceValue = getVariantUnitPrice(variant);
-        selectedPrice.textContent = priceValue !== null && !Number.isNaN(priceValue) ? formatPrice(priceValue) : '尚未設定';
-    }
-    if (headlinePrice) {
-        const priceValue = getVariantUnitPrice(variant);
-        headlinePrice.textContent = priceValue !== null && !Number.isNaN(priceValue) ? formatPrice(priceValue) : '價格：尚未設定';
-    }
-    if (priceHint) {
-        const memberPrice = getVariantMemberPrice(variant);
-        if (isMemberUser) {
-            priceHint.textContent = memberPrice !== null && !Number.isNaN(memberPrice)
-                ? '您目前是會員，已顯示會員價。'
-                : '您目前是會員，已顯示目前可用價格。';
-        } else {
-            priceHint.textContent = memberPrice !== null && !Number.isNaN(memberPrice)
-                ? '加入會員即可使用會員價：' + formatPrice(memberPrice)
-                : '加入會員即可查看會員價。';
-        }
-    }
-    if (selectedStock) {
-        selectedStock.textContent = String(variant.stock_available ?? 0);
-    }
-    if (mainImg) {
-        const nextImage = imageUrl || variant.image_url;
-        if (nextImage) {
-            mainImg.src = nextImage;
-        }
-    }
-
-    updateSubtotal();
-
-    if (thumbList) {
-        const thumbs = thumbList.querySelectorAll('img[data-image-url]');
-        thumbs.forEach((thumb) => {
-            const isActive = thumb.dataset.imageUrl === (imageUrl || variant.image_url);
-            thumb.style.outline = isActive ? '2px solid #db6b6b' : 'none';
-            thumb.style.outlineOffset = isActive ? '2px' : '0';
-        });
-    }
-}
-
-if (variantSelect) {
-    variantSelect.addEventListener('change', (event) => {
-        const option = event.target.selectedOptions[0];
-        const variantId = option ? option.value : event.target.value;
-        const imageUrl = option ? option.dataset.imageUrl : '';
-        applyVariant(variantId, imageUrl);
-    });
-
-    const selectedOption = variantSelect.selectedOptions[0];
-    if (selectedOption) {
-        applyVariant(selectedOption.value, selectedOption.dataset.imageUrl || '');
-    }
-}
-
-if (quantityInput) {
-    quantityInput.addEventListener('input', updateSubtotal);
-    quantityInput.addEventListener('change', updateSubtotal);
-}
-
-if (thumbList) {
-    thumbList.addEventListener('click', (event) => {
-        const thumb = event.target.closest('img[data-image-url]');
-        if (!thumb) {
-            return;
-        }
-
-        if (mainImg) {
-            mainImg.src = thumb.dataset.imageUrl;
-        }
-
-        const matchedVariant = variantData.find((item) => item.image_url && item.image_url === thumb.dataset.imageUrl);
-
-        if (matchedVariant) {
-            applyVariant(matchedVariant.variant_id, thumb.dataset.imageUrl);
-        } else if (thumb.dataset.color) {
-            const colorMatched = variantData.find((item) => item.color === thumb.dataset.color);
-            if (colorMatched) {
-                applyVariant(colorMatched.variant_id, thumb.dataset.imageUrl);
-            }
-        }
-    });
-}
+    const variantData = <?php echo json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const isMemberUser = <?php echo $isMemberUser ? 'true' : 'false'; ?>;
+    let globalSelectedColor = '<?php echo htmlspecialchars($defaultColor, ENT_QUOTES); ?>';
+    let globalSelectedSize = '<?php echo htmlspecialchars($defaultSizeLabel, ENT_QUOTES); ?>';
 </script>
 
+<script src="../js/product_detail.js"></script>
 <?php include 'footer.php'; $conn->close(); ?>
