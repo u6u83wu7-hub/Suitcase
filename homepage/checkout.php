@@ -1,4 +1,7 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 $pageTitle = '結帳 | All Pass';
 $activeNav = '';
 
@@ -35,67 +38,6 @@ function checkoutTableColumns($conn, $tableName) {
     }
     return $columns;
 }
-
-function checkoutFetchRows($conn, $sql) {
-    $rows = [];
-    $res = $conn->query($sql);
-    if ($res) {
-        while ($row = $res->fetch_assoc()) {
-            $rows[] = $row;
-        }
-    }
-    return $rows;
-}
-
-function checkoutFetchRow($conn, $sql) {
-    $res = $conn->query($sql);
-    if ($res && $res->num_rows > 0) {
-        return $res->fetch_assoc();
-    }
-    return null;
-}
-
-function checkoutGenerateOrderNumber() {
-    try {
-        $suffix = strtoupper(bin2hex(random_bytes(2)));
-    } catch (Throwable $e) {
-        $suffix = strtoupper(substr(md5(uniqid((string)mt_rand(), true)), 0, 4));
-    }
-    return 'AP' . date('YmdHis') . $suffix;
-}
-
-function checkoutEnsureOrderColumns($conn) {
-    if (!checkoutTableExists($conn, 'orders')) {
-        return;
-    }
-
-    $checks = [
-        'cardholder_name' => "ALTER TABLE `orders` ADD COLUMN `cardholder_name` VARCHAR(100) NULL AFTER `payment_method`",
-        'card_expiry_month' => "ALTER TABLE `orders` ADD COLUMN `card_expiry_month` VARCHAR(2) NULL AFTER `card_last4`",
-        'card_expiry_year' => "ALTER TABLE `orders` ADD COLUMN `card_expiry_year` VARCHAR(4) NULL AFTER `card_expiry_month`",
-    ];
-
-    foreach ($checks as $column => $sql) {
-        $exists = false;
-        $res = $conn->query("SHOW COLUMNS FROM `orders` LIKE '{$column}'");
-        if ($res && $res->num_rows > 0) {
-            $exists = true;
-        }
-        if (!$exists) {
-            $conn->query($sql);
-        }
-    }
-}
-
-checkoutEnsureOrderColumns($conn);
-$orderColumns = checkoutTableColumns($conn, 'orders');
-$hasShippingNotesColumn = in_array('shipping_notes', $orderColumns, true);
-$hasNoteColumn = in_array('note', $orderColumns, true);
-$orderItemColumns = checkoutTableColumns($conn, 'order_items');
-$hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
-$hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
-$hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
-$hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumns, true);
 
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',

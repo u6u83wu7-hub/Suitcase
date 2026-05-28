@@ -157,6 +157,7 @@ if (columnExists($conn, 'cart_items', 'variant_id')) {
 
 $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `order_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_number` VARCHAR(50) NULL,
     `user_id` INT NOT NULL,
     `subtotal_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `shipping_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -168,11 +169,35 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `shipping_address` TEXT NOT NULL,
     `shipping_notes` VARCHAR(255) NULL,
     `payment_method` VARCHAR(50) NOT NULL DEFAULT 'COD',
+    `cardholder_name` VARCHAR(100) NULL,
+    `card_brand` VARCHAR(30) NULL,
+    `card_last4` VARCHAR(4) NULL,
+    `card_expiry_month` VARCHAR(2) NULL,
+    `card_expiry_year` VARCHAR(4) NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_orders_user_id` (`user_id`),
     INDEX `idx_orders_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_orders);
+
+if (!columnExists($conn, 'orders', 'order_number')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `order_number` VARCHAR(50) NULL AFTER `order_id`");
+}
+if (!columnExists($conn, 'orders', 'cardholder_name')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `cardholder_name` VARCHAR(100) NULL AFTER `payment_method`");
+}
+if (!columnExists($conn, 'orders', 'card_brand')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_brand` VARCHAR(30) NULL AFTER `cardholder_name`");
+}
+if (!columnExists($conn, 'orders', 'card_last4')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_last4` VARCHAR(4) NULL AFTER `card_brand`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_month')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_month` VARCHAR(2) NULL AFTER `card_last4`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_year')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_year` VARCHAR(4) NULL AFTER `card_expiry_month`");
+}
 
 $sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
     `order_item_id` INT AUTO_INCREMENT PRIMARY KEY,
