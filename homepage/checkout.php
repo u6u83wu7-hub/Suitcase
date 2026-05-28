@@ -39,6 +39,58 @@ function checkoutTableColumns($conn, $tableName) {
     return $columns;
 }
 
+function checkoutFetchRow($conn, $sql) {
+    $res = $conn->query($sql);
+    if (!$res) {
+        return null;
+    }
+    $row = $res->fetch_assoc();
+    $res->free();
+    return $row ?: null;
+}
+
+function checkoutFetchRows($conn, $sql) {
+    $rows = [];
+    $res = $conn->query($sql);
+    if (!$res) {
+        return $rows;
+    }
+    while ($row = $res->fetch_assoc()) {
+        $rows[] = $row;
+    }
+    $res->free();
+    return $rows;
+}
+
+function checkoutGenerateOrderNumber($conn) {
+    for ($i = 0; $i < 5; $i++) {
+        $orderNumber = 'ORD' . date('YmdHis') . random_int(1000, 9999);
+        $escaped = $conn->real_escape_string($orderNumber);
+        $res = $conn->query("SELECT 1 FROM orders WHERE order_number = '{$escaped}' LIMIT 1");
+        if (!$res || $res->num_rows === 0) {
+            if ($res) {
+                $res->free();
+            }
+            return $orderNumber;
+        }
+        $res->free();
+    }
+
+    return 'ORD' . date('YmdHis') . mt_rand(10000, 99999);
+}
+
+$userColumns = checkoutTableExists($conn, 'users') ? checkoutTableColumns($conn, 'users') : [];
+$memberColumns = checkoutTableExists($conn, 'user_member_details') ? checkoutTableColumns($conn, 'user_member_details') : [];
+$orderColumns = checkoutTableExists($conn, 'orders') ? checkoutTableColumns($conn, 'orders') : [];
+$orderItemColumns = checkoutTableExists($conn, 'order_items') ? checkoutTableColumns($conn, 'order_items') : [];
+
+$hasShippingNotesColumn = in_array('shipping_notes', $orderColumns, true);
+$hasNoteColumn = in_array('note', $orderColumns, true);
+$hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
+$hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
+$hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
+$hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumns, true);
+
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
     'email' => isset($_SESSION['user_email']) ? $_SESSION['user_email'] : '',
@@ -215,7 +267,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
         $conn->begin_transaction();
         try {
-            $orderNumber = checkoutGenerateOrderNumber();
+            $orderNumber = checkoutGenerateOrderNumber($conn);
             $orderStatus = 'PENDING';
             $combinedNote = trim($formAddressNote . (($formAddressNote !== '' && $formNote !== '') ? ' | ' : '') . $formNote);
 
@@ -643,3 +695,5 @@ include 'header.php';
 </script>
 
 <?php include 'footer.php'; $conn->close(); ?>
+
+
