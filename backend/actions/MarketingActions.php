@@ -64,6 +64,67 @@ function normalizeProductIds($productIds) {
     return array_keys($normalized);
 }
 
+function findPromotionConflicts($conn, $promotionId, $productIds, $startAt, $endAt) {
+    $productIds = normalizeProductIds($productIds);
+    if (empty($productIds)) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+    $sql = "
+        SELECT
+            pp.product_id,
+            pr.name AS product_name,
+            p.id AS promotion_id,
+            p.name AS promotion_name,
+            p.start_at,
+            p.end_at
+        FROM promotion_products pp
+        INNER JOIN promotions p ON p.id = pp.promotion_id
+        LEFT JOIN products pr ON pr.product_id = pp.product_id
+        WHERE pp.product_id IN ({$placeholders})
+          AND p.is_active = 1
+          AND p.id <> ?
+          AND NOT (p.end_at < ? OR p.start_at > ?)
+        ORDER BY pp.product_id ASC, p.start_at DESC
+    ";
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        return [];
+    }
+
+    $types = str_repeat('i', count($productIds)) . 'iss';
+    $params = array_merge($productIds, [(int)$promotionId, $startAt, $endAt]);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $conflicts = [];
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $conflicts[] = $row;
+        }
+    }
+    return $conflicts;
+}
+
+function buildConflictMessage($conflicts) {
+    if (empty($conflicts)) {
+        return '';
+    }
+
+    $items = [];
+    foreach (array_slice($conflicts, 0, 6) as $row) {
+        $items[] = '#' . intval($row['product_id']) . ' ' . ($row['product_name'] ?? '未命名商品') . '（' . ($row['promotion_name'] ?? '其他活動') . '）';
+    }
+
+    $message = '以下商品已在其他啟用活動檔期內：' . implode('、', $items);
+    if (count($conflicts) > 6) {
+        $message .= '...';
+    }
+    return $message;
+}
+
 function savePromotionImage($promotionId, $fileInfo) {
     $extension = strtolower(pathinfo($fileInfo['name'], PATHINFO_EXTENSION));
     $allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
@@ -129,6 +190,17 @@ function getPromotionDiscount($conn, $promotionId) {
     return $res->fetch_assoc();
 }
 
+function getPromotionSchedule($conn, $promotionId) {
+    $stmt = $conn->prepare("SELECT start_at, end_at, is_active FROM promotions WHERE id = ?");
+    $stmt->bind_param('i', $promotionId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if (!$res || $res->num_rows === 0) {
+        throw new Exception('找不到活動');
+    }
+    return $res->fetch_assoc();
+}
+
 function syncPromotionProducts($conn, $promotionId, $productIds, $discountType, $discountValue) {
     $productIds = normalizeProductIds($productIds);
 
@@ -157,9 +229,7 @@ function syncPromotionProducts($conn, $promotionId, $productIds, $discountType, 
         }
     }
 
-    $removed = array_diff($existing, $productIds);
-    clearPromotionPrices($conn, $removed);
-    applyPromotionDiscount($conn, $productIds, $discountType, $discountValue);
+    return;
 }
 
 if ($action === 'add_promotion') {
@@ -201,6 +271,12 @@ if ($action === 'add_promotion') {
     $discountValue = parseDiscountValue($discountType, $discountValueRaw);
     if ($discountValue === null) {
         goMarketing('折扣規則不正確', $errorParams);
+    }
+
+    $productIds = normalizeProductIds($productIds);
+    $conflicts = findPromotionConflicts($conn, 0, $productIds, $startAt, $endAt);
+    if (!empty($conflicts)) {
+        goMarketing(buildConflictMessage($conflicts), $errorParams);
     }
 
     if (!isset($_FILES['promotion_image'])) {
@@ -283,6 +359,12 @@ if ($action === 'update_promotion') {
         goMarketing('折扣規則不正確', $errorParams);
     }
 
+    $productIds = normalizeProductIds($productIds);
+    $conflicts = findPromotionConflicts($conn, $promotionId, $productIds, $startAt, $endAt);
+    if (!empty($conflicts)) {
+        goMarketing(buildConflictMessage($conflicts), $errorParams);
+    }
+
     $conn->begin_transaction();
     try {
         $check = $conn->prepare("SELECT promotion_image_url FROM promotions WHERE id = ?");
@@ -332,8 +414,16 @@ if ($action === 'sync_promotion_products') {
         goMarketing('活動資料不完整', 'edit');
     }
 
+    $productIds = normalizeProductIds($productIds);
+
     $conn->begin_transaction();
     try {
+        $schedule = getPromotionSchedule($conn, $promotionId);
+        $conflicts = findPromotionConflicts($conn, $promotionId, $productIds, $schedule['start_at'], $schedule['end_at']);
+        if (!empty($conflicts)) {
+            throw new Exception(buildConflictMessage($conflicts));
+        }
+
         $discount = getPromotionDiscount($conn, $promotionId);
         syncPromotionProducts($conn, $promotionId, $productIds, $discount['discount_type'], (float)$discount['discount_value']);
         $conn->commit();

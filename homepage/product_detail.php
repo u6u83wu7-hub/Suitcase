@@ -35,6 +35,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+date_default_timezone_set('Asia/Taipei');
+require_once __DIR__ . '/includes/promotion_price_sync.php';
+
 $cartNotice = '';
 $cartNoticeType = 'success';
 $currentUserMembershipLevel = 1;
@@ -49,6 +52,7 @@ $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
 }
+apRunPromotionSync($conn);
 
 if (!empty($_SESSION['user_id'])) {
     $currentUserId = intval($_SESSION['user_id']);

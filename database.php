@@ -5,12 +5,15 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 mysqli_report(MYSQLI_REPORT_OFF); 
 
+date_default_timezone_set('Asia/Taipei');
+
 // 建立資料庫連線
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
 }
+$conn->query("SET time_zone = '+08:00'");
 ?>
 
 <!DOCTYPE html>

@@ -2,6 +2,8 @@
 
 <?php
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../homepage/includes/promotion_price_sync.php';
+apRunPromotionSync($conn);
 // marketing.php - 行銷活動管理主頁面
 //版本3
 function h($value) {
@@ -84,6 +86,16 @@ if ($ppResult) {
 	}
 }
 
+$productUsage = [];
+foreach ($promotionProducts as $promotionId => $productIds) {
+	foreach ($productIds as $productId) {
+		if (!isset($productUsage[$productId])) {
+			$productUsage[$productId] = [];
+		}
+		$productUsage[$productId][] = (int)$promotionId;
+	}
+}
+
 $bannerMap = [];
 $bannerResult = $conn->query("SELECT promotion_id, banner_image_url FROM promotion_banners ORDER BY sort_order ASC");
 if ($bannerResult) {
@@ -120,7 +132,6 @@ if ($activeResult) {
 	<div class="pm-head">
 		<div>
 			<h1 class="pm-title">📢 行銷活動管理</h1>
-			<p class="pm-sub">三段式管理：活動主檔 → 商品綁定 → Banner 版位。</p>
 		</div>
 		<button class="pm-btn pm-btn-main" type="button" id="openCreatePromotion">+ 新增活動</button>
 	</div>
@@ -282,8 +293,22 @@ if ($activeResult) {
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px; }
 .modal-title { font-size: 18px; font-weight: 700; color: #0f172a; }
 .modal-body { overflow-y: auto; flex: 1; padding-right: 8px; }
-.product-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-.product-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; display: flex; gap: 8px; align-items: center; }
+.product-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 8px 0 10px; }
+.product-search { flex: 1; display: flex; }
+.product-search input { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; color: #0f172a; }
+.product-meta { display: flex; gap: 8px; font-size: 12px; }
+.product-count { padding: 6px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; font-weight: 600; }
+.product-count.is-selected { background: #dbeafe; color: #1d4ed8; }
+.product-list { max-height: 320px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; background: #f8fafc; }
+.product-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.product-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; }
+.product-card:hover { border-color: #cbd5f5; box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08); transform: translateY(-1px); }
+.product-card input { width: 18px; height: 18px; accent-color: #2563eb; }
+.product-card .product-info { display: flex; flex-direction: column; gap: 4px; }
+.product-card .product-title { font-weight: 700; color: #0f172a; font-size: 14px; }
+.product-card .product-sub { font-size: 12px; color: #64748b; }
+.product-card.is-selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
+.product-empty { grid-column: 1 / -1; padding: 18px; text-align: center; color: #94a3b8; }
 .banner-preview { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .banner-preview img { width: 160px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; }
 </style>
@@ -338,7 +363,18 @@ if ($activeResult) {
 				</div>
 				<div class="pm-col-12">
 					<label>選擇活動商品</label>
-					<div class="product-grid" id="createProductsList"></div>
+					<div class="product-toolbar">
+						<div class="product-search">
+							<input type="text" id="createProductSearch" placeholder="搜尋商品名稱或 ID">
+						</div>
+						<div class="product-meta">
+							<span class="product-count" id="createAvailableCount">可選 0</span>
+							<span class="product-count is-selected" id="createSelectedCount">已選 0</span>
+						</div>
+					</div>
+					<div class="product-list">
+						<div class="product-grid" id="createProductsList"></div>
+					</div>
 				</div>
 				<div class="pm-col-12" style="display:flex; gap:10px; justify-content:flex-end;">
 					<button class="pm-btn pm-btn-main" type="submit">建立活動</button>
@@ -399,7 +435,18 @@ if ($activeResult) {
 				</div>
 				<div class="pm-col-12">
 					<label>選擇活動商品</label>
-					<div class="product-grid" id="editProductsList"></div>
+					<div class="product-toolbar">
+						<div class="product-search">
+							<input type="text" id="editProductSearch" placeholder="搜尋商品名稱或 ID">
+						</div>
+						<div class="product-meta">
+							<span class="product-count" id="editAvailableCount">可選 0</span>
+							<span class="product-count is-selected" id="editSelectedCount">已選 0</span>
+						</div>
+					</div>
+					<div class="product-list">
+						<div class="product-grid" id="editProductsList"></div>
+					</div>
 				</div>
 				<div class="pm-col-12" style="display:flex; gap:10px; justify-content:flex-end;">
 					<button class="pm-btn pm-btn-main" type="submit">儲存活動</button>
@@ -418,7 +465,18 @@ if ($activeResult) {
 		<form action="backend_action.php" method="POST" class="modal-body" id="bindProductsForm">
 			<input type="hidden" name="action" value="sync_promotion_products">
 			<input type="hidden" name="promotion_id" id="bindPromotionId" value="">
-			<div class="product-grid" id="bindProductsList"></div>
+			<div class="product-toolbar">
+				<div class="product-search">
+					<input type="text" id="bindProductSearch" placeholder="搜尋商品名稱或 ID">
+				</div>
+				<div class="product-meta">
+					<span class="product-count" id="bindAvailableCount">可選 0</span>
+					<span class="product-count is-selected" id="bindSelectedCount">已選 0</span>
+				</div>
+			</div>
+			<div class="product-list">
+				<div class="product-grid" id="bindProductsList"></div>
+			</div>
 			<div style="margin-top:16px; display:flex; gap:10px; justify-content:flex-end;">
 				<button class="pm-btn pm-btn-main" type="submit">儲存商品綁定</button>
 			</div>
@@ -466,6 +524,7 @@ if ($activeResult) {
 const promotionProducts = <?php echo json_encode($promotionProducts, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 const allProducts = <?php echo json_encode($allProducts, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 const bannerMap = <?php echo json_encode($bannerMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+const productUsage = <?php echo json_encode($productUsage, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 const promotionModal = document.getElementById('promotionModal');
 const editPromotionModal = document.getElementById('editPromotionModal');
@@ -474,9 +533,27 @@ const bannerModal = document.getElementById('bannerModal');
 
 const createProductsList = document.getElementById('createProductsList');
 const editProductsList = document.getElementById('editProductsList');
+const bindProductsList = document.getElementById('bindProductsList');
+
+const createProductSearch = document.getElementById('createProductSearch');
+const editProductSearch = document.getElementById('editProductSearch');
+const bindProductSearch = document.getElementById('bindProductSearch');
+
+const createSelectedCount = document.getElementById('createSelectedCount');
+const editSelectedCount = document.getElementById('editSelectedCount');
+const bindSelectedCount = document.getElementById('bindSelectedCount');
+
+const createAvailableCount = document.getElementById('createAvailableCount');
+const editAvailableCount = document.getElementById('editAvailableCount');
+const bindAvailableCount = document.getElementById('bindAvailableCount');
+
+const productToPromotions = {};
+Object.keys(productUsage || {}).forEach(productId => {
+	productToPromotions[productId] = (productUsage[productId] || []).map(Number);
+});
 
 document.getElementById('openCreatePromotion').addEventListener('click', () => {
-	renderProductCheckboxesTo(createProductsList, new Set());
+	renderCreateProducts(new Set());
 	promotionModal.style.display = 'flex';
 });
 
@@ -502,7 +579,7 @@ document.querySelectorAll('.js-bind-products').forEach(btn => {
 		const promotionName = btn.dataset.name || '';
 		document.getElementById('bindPromotionId').value = promotionId;
 		document.getElementById('bindProductsTitle').textContent = '活動商品綁定 - ' + promotionName;
-		renderProductCheckboxes(promotionId);
+		renderBindProducts(promotionId, new Set(promotionProducts[promotionId] || []));
 		bindProductsModal.style.display = 'flex';
 	});
 });
@@ -533,7 +610,7 @@ document.querySelectorAll('.js-edit-promotion').forEach(btn => {
 		document.getElementById('edit_promotion_active').value = btn.dataset.isActive || '1';
 
 		const selected = new Set(promotionProducts[promotionId] || []);
-		renderProductCheckboxesTo(editProductsList, selected);
+		renderEditProducts(promotionId, selected);
 		updateDiscountMeta(document.getElementById('edit_promotion_discount_type'), document.getElementById('edit_promotion_discount_value'), document.getElementById('edit_promotion_discount_label'));
 
 		const preview = document.getElementById('editImagePreview');
@@ -554,39 +631,164 @@ document.querySelectorAll('.js-edit-promotion').forEach(btn => {
 	});
 });
 
-function renderProductCheckboxesTo(container, selected) {
+if (createProductSearch) {
+	createProductSearch.addEventListener('input', () => {
+		renderCreateProducts(getSelectedIds(createProductsList));
+	});
+}
+
+if (editProductSearch) {
+	editProductSearch.addEventListener('input', () => {
+		const promotionId = editProductsList ? editProductsList.dataset.promotionId : '';
+		renderEditProducts(promotionId, getSelectedIds(editProductsList));
+	});
+}
+
+if (bindProductSearch) {
+	bindProductSearch.addEventListener('input', () => {
+		const promotionId = bindProductsList ? bindProductsList.dataset.promotionId : '';
+		renderBindProducts(promotionId, getSelectedIds(bindProductsList));
+	});
+}
+
+function getAvailableProductSet(promotionId) {
+	const available = new Set();
+	const targetId = promotionId ? parseInt(promotionId, 10) : null;
+
+	allProducts.forEach(product => {
+		const pid = parseInt(product.product_id, 10);
+		const promos = productToPromotions[pid] || [];
+		if (promos.length === 0 || (targetId !== null && promos.includes(targetId))) {
+			available.add(pid);
+		}
+	});
+
+	return available;
+}
+
+function getSelectedIds(container) {
+	if (!container) {
+		return new Set();
+	}
+	const selected = new Set();
+	container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+		selected.add(parseInt(cb.value, 10));
+	});
+	return selected;
+}
+
+function updateSelectedCount(container, selectedCountEl) {
+	if (!selectedCountEl || !container) {
+		return;
+	}
+	const count = container.querySelectorAll('input[type="checkbox"]:checked').length;
+	selectedCountEl.textContent = '已選 ' + count;
+}
+
+function renderCreateProducts(selected) {
+	const availableSet = getAvailableProductSet('');
+	renderProductCheckboxesTo(createProductsList, selected, {
+		availableSet,
+		query: createProductSearch ? createProductSearch.value : '',
+		selectedCountEl: createSelectedCount,
+		availableCountEl: createAvailableCount,
+	});
+}
+
+function renderEditProducts(promotionId, selected) {
+	if (editProductsList) {
+		editProductsList.dataset.promotionId = promotionId || '';
+	}
+	const availableSet = getAvailableProductSet(promotionId);
+	renderProductCheckboxesTo(editProductsList, selected, {
+		availableSet,
+		query: editProductSearch ? editProductSearch.value : '',
+		selectedCountEl: editSelectedCount,
+		availableCountEl: editAvailableCount,
+	});
+}
+
+function renderBindProducts(promotionId, selected) {
+	if (bindProductsList) {
+		bindProductsList.dataset.promotionId = promotionId || '';
+	}
+	const availableSet = getAvailableProductSet(promotionId);
+	renderProductCheckboxesTo(bindProductsList, selected, {
+		availableSet,
+		query: bindProductSearch ? bindProductSearch.value : '',
+		selectedCountEl: bindSelectedCount,
+		availableCountEl: bindAvailableCount,
+	});
+}
+
+function renderProductCheckboxesTo(container, selected, options = {}) {
 	if (!container) {
 		return;
 	}
 	container.innerHTML = '';
 
+	const availableSet = options.availableSet || null;
+	const query = (options.query || '').trim().toLowerCase();
+	if (options.availableCountEl) {
+		const availableCount = availableSet ? availableSet.size : allProducts.length;
+		options.availableCountEl.textContent = '可選 ' + availableCount;
+	}
+
 	if (allProducts.length === 0) {
-		container.innerHTML = '<div style="color:#94a3b8;">目前沒有商品可綁定。</div>';
+		container.innerHTML = '<div class="product-empty">目前沒有商品可綁定。</div>';
+		updateSelectedCount(container, options.selectedCountEl);
 		return;
 	}
 
+	let matched = 0;
 	allProducts.forEach(product => {
+		const pid = parseInt(product.product_id, 10);
+		if (availableSet && !availableSet.has(pid)) {
+			return;
+		}
+		const name = product.name || '';
+		const haystack = (pid + ' ' + name).toLowerCase();
+		if (query !== '' && !haystack.includes(query)) {
+			return;
+		}
+		matched += 1;
+
 		const wrapper = document.createElement('label');
 		wrapper.className = 'product-card';
 		const checkbox = document.createElement('input');
 		checkbox.type = 'checkbox';
 		checkbox.name = 'product_ids[]';
 		checkbox.value = product.product_id;
-		checkbox.checked = selected.has(parseInt(product.product_id, 10));
+		checkbox.checked = selected.has(pid);
 
 		const info = document.createElement('div');
-		info.innerHTML = '<div style="font-weight:600; color:#0f172a;">#' + product.product_id + ' ' + product.name + '</div>';
+		info.className = 'product-info';
+		info.innerHTML = '<div class="product-title">#' + product.product_id + ' ' + name + '</div>' +
+			'<div class="product-sub">ID ' + product.product_id + '</div>';
+
+		if (checkbox.checked) {
+			wrapper.classList.add('is-selected');
+		}
+
+		checkbox.addEventListener('change', () => {
+			wrapper.classList.toggle('is-selected', checkbox.checked);
+			updateSelectedCount(container, options.selectedCountEl);
+		});
 
 		wrapper.appendChild(checkbox);
 		wrapper.appendChild(info);
 		container.appendChild(wrapper);
 	});
+
+	if (matched === 0) {
+		container.innerHTML = '<div class="product-empty">沒有符合條件的商品。</div>';
+	}
+
+	updateSelectedCount(container, options.selectedCountEl);
 }
 
 function renderProductCheckboxes(promotionId) {
-	const container = document.getElementById('bindProductsList');
-	const selected = new Set(promotionProducts[promotionId] || []);
-	renderProductCheckboxesTo(container, selected);
+	renderBindProducts(promotionId, new Set(promotionProducts[promotionId] || []));
 }
 
 function updateDiscountMeta(selectEl, inputEl, labelEl) {

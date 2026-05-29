@@ -9,6 +9,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+date_default_timezone_set('Asia/Taipei');
+require_once __DIR__ . '/includes/promotion_price_sync.php';
+
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
@@ -20,6 +23,7 @@ if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
 }
 $conn->set_charset('utf8mb4');
+apRunPromotionSync($conn);
 
 function checkoutTableExists($conn, $tableName) {
     $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);

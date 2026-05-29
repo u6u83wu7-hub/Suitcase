@@ -4,6 +4,8 @@
 //版本4
 require_once __DIR__ . '/auth_guard.php';
 
+date_default_timezone_set('Asia/Taipei');
+
 // 資料庫連線
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 
@@ -12,6 +14,7 @@ if ($conn->connect_error) {
 }
 
 $conn->set_charset("utf8mb4");
+$conn->query("SET time_zone = '+08:00'");
 
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     header("Location: backend.php?page=products");

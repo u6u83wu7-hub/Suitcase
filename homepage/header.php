@@ -3,6 +3,13 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+date_default_timezone_set('Asia/Taipei');
+require_once __DIR__ . '/includes/promotion_price_sync.php';
+
+if (isset($conn)) {
+    apRunPromotionSync($conn);
+}
+
 if (!function_exists('hpTableExists')) {
     function hpTableExists($conn, $tableName) {
         $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -16,6 +23,7 @@ if (isset($_SESSION['user_id'])) {
     $headerConn = @new mysqli('localhost', 'root', '', 'all_pass_db');
     if (!$headerConn->connect_error) {
         $headerConn->set_charset('utf8mb4');
+        apSetDbTimeZone($headerConn);
         if (hpTableExists($headerConn, 'cart_items')) {
             $userId = intval($_SESSION['user_id']);
             $badgeSql = "SELECT COUNT(*) AS total_qty FROM cart_items WHERE user_id = {$userId}";
