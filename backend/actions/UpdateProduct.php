@@ -220,9 +220,12 @@ try {
     $mainNewImageId = 0;
     $hasUpload = isset($_FILES['product_images']) && isset($_FILES['product_images']['name']) && is_array($_FILES['product_images']['name']);
 
+    $displayOrderColumn = in_array('sort_order', $imageColumns, true)
+        ? 'sort_order'
+        : (in_array('display_order', $imageColumns, true) ? 'display_order' : '');
     $displayOrderStart = 0;
-    if (in_array('display_order', $imageColumns, true)) {
-        $maxRes = $conn->query("SELECT COALESCE(MAX(display_order), 0) AS max_order FROM product_images WHERE product_id = {$productId}");
+    if ($displayOrderColumn !== '') {
+        $maxRes = $conn->query("SELECT COALESCE(MAX({$displayOrderColumn}), 0) AS max_order FROM product_images WHERE product_id = {$productId}");
         if ($maxRes) {
             $displayOrderStart = intval($maxRes->fetch_assoc()['max_order']) + 1;
         }
@@ -258,8 +261,8 @@ try {
             $iTypes = 'isi';
             $iVals = [$productId, $imageUrl, $isMain];
 
-            if (in_array('display_order', $imageColumns, true)) {
-                $iCols[] = 'display_order';
+            if ($displayOrderColumn !== '') {
+                $iCols[] = $displayOrderColumn;
                 $iTypes .= 'i';
                 $iVals[] = $displayOrderStart + $idx;
             }

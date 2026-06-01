@@ -5,6 +5,7 @@ $activeNav = 'promotions';
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/includes/storefront_helpers.php';
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
@@ -77,6 +78,18 @@ function ppDiscountPrice($basePrice, $discountType, $discountValue) {
     return max(0, $basePrice - $discountValue);
 }
 
+function ppDateRange($startAt, $endAt) {
+    return date('Y.m.d', strtotime($startAt)) . ' - ' . date('Y.m.d', strtotime($endAt));
+}
+
+function ppDiscountCopy($type, $value) {
+    $value = (float)$value;
+    if ($type === 'PERCENT') {
+        return '現折 ' . rtrim(rtrim(number_format($value, 2), '0'), '.') . '%';
+    }
+    return '折抵 NT$ ' . number_format($value);
+}
+
 $promotionId = isset($_GET['promotion_id']) ? intval($_GET['promotion_id']) : 0;
 $promotion = null;
 $productRows = [];
@@ -84,6 +97,7 @@ $productRows = [];
 if ($promotionId > 0 && ppTableExists($conn, 'promotions') && ppTableExists($conn, 'promotion_products')) {
     $promotion = ppFetchRow($conn, "SELECT id, name, promotion_image_url, description, discount_type, discount_value, start_at, end_at, is_active FROM promotions WHERE id = {$promotionId} AND is_active = 1 LIMIT 1");
     if ($promotion) {
+        $imageOrderBy = sfProductImageOrder($conn, 'pi');
         $sql = "
             SELECT
                 p.product_id,
@@ -92,7 +106,7 @@ if ($promotionId > 0 && ppTableExists($conn, 'promotions') && ppTableExists($con
                     SELECT pi.image_url
                     FROM product_images pi
                     WHERE pi.product_id = p.product_id
-                    ORDER BY pi.is_main DESC, pi.sort_order ASC, pi.image_id ASC
+                    ORDER BY {$imageOrderBy}
                     LIMIT 1
                 ), '') AS image_url,
                 COALESCE(MIN(COALESCE(v.original_price, 0)), 0) AS original_price,
@@ -113,11 +127,12 @@ include 'header.php';
 
 <style>
     .pp-wrap { max-width: 1200px; margin: 0 auto; padding: 170px 5% 70px; }
-    .pp-hero { margin-bottom: 24px; padding: 28px; border-radius: 24px; background: linear-gradient(135deg, rgba(219,107,107,0.12), rgba(26,26,26,0.04)); border: 1px solid #eee; }
+    .pp-hero { margin-bottom: 24px; padding: 32px; border-radius: 8px; background: #111827; border: 1px solid #111827; }
     .pp-hero h1 { font-size: 34px; margin-bottom: 10px; color: #1f2937; }
-    .pp-hero p { color: #6b7280; line-height: 1.8; }
+    .pp-hero h1 { color: #fff; }
+    .pp-hero p { color: rgba(255,255,255,0.82); line-height: 1.8; }
     .pp-list { display: grid; gap: 18px; }
-    .pp-card { display: grid; grid-template-columns: 220px 1fr auto; gap: 18px; align-items: stretch; background: #fff; border: 1px solid #ececec; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.04); }
+    .pp-card { display: grid; grid-template-columns: 220px 1fr auto; gap: 18px; align-items: stretch; background: #fff; border: 1px solid #ececec; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.04); }
     .pp-image { min-height: 170px; background: #f5f5f5; }
     .pp-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .pp-body { padding: 22px 0; display: flex; flex-direction: column; justify-content: center; }
@@ -130,7 +145,7 @@ include 'header.php';
     .pp-badge { display: inline-flex; align-items: center; justify-content: center; padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .04em; }
     .pp-on { background: #dcfce7; color: #166534; }
     .pp-off { background: #fee2e2; color: #991b1b; }
-    .pp-empty { padding: 36px; text-align: center; color: #6b7280; border: 1px dashed #ddd; border-radius: 18px; background: #fff; }
+    .pp-empty { padding: 36px; text-align: center; color: #6b7280; border: 1px dashed #ddd; border-radius: 8px; background: #fff; }
     @media (max-width: 900px) {
         .pp-card { grid-template-columns: 1fr; }
         .pp-aside { padding: 0 22px 22px; align-items: flex-start; }
@@ -153,8 +168,8 @@ include 'header.php';
             <p>以下列出此活動綁定的商品。價格已依活動折扣計算，按鈕可直接前往商品詳情頁。</p>
             <div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:10px;">
                 <span class="pp-badge <?php echo $statusClass; ?>"><?php echo $statusText; ?></span>
-                <span class="pp-badge pp-off"><?php echo ppH($promotion['discount_type'] === 'PERCENT' ? rtrim(rtrim(number_format((float)$promotion['discount_value'], 2), '0'), '.') . '% OFF' : '折抵 NT$ ' . number_format((float)$promotion['discount_value'])); ?></span>
-                <span class="pp-badge" style="background:#f8fafc; color:#334155;">活動期間：<?php echo ppH($promotion['start_at']); ?> ~ <?php echo ppH($promotion['end_at']); ?></span>
+                <span class="pp-badge pp-off"><?php echo ppH(ppDiscountCopy($promotion['discount_type'], $promotion['discount_value'])); ?></span>
+                <span class="pp-badge" style="background:#f8fafc; color:#334155;">活動期間：<?php echo ppH(ppDateRange($promotion['start_at'], $promotion['end_at'])); ?></span>
             </div>
         </div>
 

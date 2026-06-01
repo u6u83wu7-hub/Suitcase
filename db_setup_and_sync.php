@@ -366,6 +366,20 @@ if (!columnExists($conn, 'product_images', 'color')) {
     }
 }
 
+if (!columnExists($conn, 'product_images', 'sort_order')) {
+    $afterColumn = columnExists($conn, 'product_images', 'display_order') ? 'display_order' : 'is_main';
+    $sql = "ALTER TABLE `product_images` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 AFTER `{$afterColumn}`";
+    if ($conn->query($sql)) {
+        echo "<p style='color:green;'>✅ 同步成功：已在 `product_images` 追加 `sort_order` 圖片排序欄位</p>";
+    }
+}
+
+if (columnExists($conn, 'product_images', 'display_order') && columnExists($conn, 'product_images', 'sort_order')) {
+    if ($conn->query("UPDATE `product_images` SET `sort_order` = `display_order` WHERE (`sort_order` = 0 OR `sort_order` IS NULL) AND `display_order` IS NOT NULL")) {
+        echo "<p style='color:green;'>✅ 已同步舊欄位 `display_order` 到 `sort_order`</p>";
+    }
+}
+
 if (!columnExists($conn, 'products', 'description')) {
     $sql = "ALTER TABLE `products` ADD COLUMN `description` TEXT NULL AFTER `name`";
     if ($conn->query($sql)) {

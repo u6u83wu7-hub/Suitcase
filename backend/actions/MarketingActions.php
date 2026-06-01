@@ -491,3 +491,42 @@ if ($action === 'upload_promotion_banner') {
         goMarketing($e->getMessage());
     }
 }
+
+if ($action === 'delete_promotion_banner') {
+    $promotionId = isset($_POST['promotion_id']) ? intval($_POST['promotion_id']) : 0;
+    $bannerUrl = isset($_POST['banner_image_url']) ? trim($_POST['banner_image_url']) : '';
+
+    if ($promotionId <= 0 || $bannerUrl === '') {
+        goMarketing('Banner 資料不完整');
+    }
+
+    $stmt = $conn->prepare("SELECT banner_image_url FROM promotion_banners WHERE promotion_id = ? AND banner_image_url = ? LIMIT 1");
+    $stmt->bind_param('is', $promotionId, $bannerUrl);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if (!$result || $result->num_rows === 0) {
+        goMarketing('找不到要刪除的 Banner');
+    }
+
+    $conn->begin_transaction();
+    try {
+        $delete = $conn->prepare("DELETE FROM promotion_banners WHERE promotion_id = ? AND banner_image_url = ?");
+        $delete->bind_param('is', $promotionId, $bannerUrl);
+        if (!$delete->execute()) {
+            throw new Exception('Banner 刪除失敗');
+        }
+
+        $conn->commit();
+
+        $filePath = realpath(__DIR__ . '/../../' . ltrim($bannerUrl, '/'));
+        $promotionDir = realpath(__DIR__ . '/../../img/promotions');
+        if ($filePath && $promotionDir && strpos($filePath, $promotionDir) === 0 && is_file($filePath)) {
+            @unlink($filePath);
+        }
+
+        goMarketing('Banner 已刪除');
+    } catch (Exception $e) {
+        $conn->rollback();
+        goMarketing($e->getMessage());
+    }
+}

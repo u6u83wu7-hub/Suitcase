@@ -172,7 +172,11 @@ try {
         $iTypes = 'isi';
         $iVals = [$productId, $imageUrl, $isMain];
         
-        if (in_array('display_order', $imageColumns, true)) {
+        if (in_array('sort_order', $imageColumns, true)) {
+            $iCols[] = 'sort_order';
+            $iTypes .= 'i';
+            $iVals[] = $displayOrder;
+        } elseif (in_array('display_order', $imageColumns, true)) {
             $iCols[] = 'display_order';
             $iTypes .= 'i';
             $iVals[] = $displayOrder;

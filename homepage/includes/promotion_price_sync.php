@@ -7,9 +7,26 @@ if (!function_exists('apSetDbTimeZone')) {
     }
 }
 
+if (!function_exists('apTableExists')) {
+    function apTableExists($conn, $tableName) {
+        if (!($conn instanceof mysqli)) {
+            return false;
+        }
+        $safe = preg_replace('/[^a-zA-Z0-9_]/', '', (string)$tableName);
+        if ($safe === '') {
+            return false;
+        }
+        $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+        return ($res && $res->num_rows > 0);
+    }
+}
+
 if (!function_exists('apSyncPromotionPrices')) {
     function apSyncPromotionPrices($conn) {
         if (!($conn instanceof mysqli)) {
+            return;
+        }
+        if (!apTableExists($conn, 'product_variants') || !apTableExists($conn, 'promotions') || !apTableExists($conn, 'promotion_products')) {
             return;
         }
 
@@ -29,7 +46,9 @@ if (!function_exists('apSyncPromotionPrices')) {
                 ELSE NULL
             END
         ";
-        $conn->query($sql);
+        if (!$conn->query($sql)) {
+            error_log('[promotion_price_sync] sync failed: ' . $conn->error);
+        }
     }
 }
 

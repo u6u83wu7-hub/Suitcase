@@ -1,32 +1,61 @@
 <?php
-// Temporary: show PHP errors to help debug why page output is missing
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
+
+if (defined('MYSQLI_REPORT_OFF') && function_exists('mysqli_report')) {
+    mysqli_report(MYSQLI_REPORT_OFF);
+}
+
 $pageTitle = 'NEW IN 新品 | All Pass 行李箱專賣';
 $activeNav = 'new_in';
+require_once __DIR__ . '/includes/storefront_helpers.php';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
+}
+$conn->set_charset('utf8mb4');
+
+$categoryId = isset($_GET['category_id']) ? intval($_GET['category_id']) : 0;
+$categoryName = '';
+if ($categoryId > 0 && sfTableExists($conn, 'categories')) {
+    $catRes = $conn->query("SELECT name FROM categories WHERE category_id = {$categoryId} LIMIT 1");
+    if ($catRes && ($catRow = $catRes->fetch_assoc())) {
+        $categoryName = $catRow['name'];
+        $pageTitle = $categoryName . ' | All Pass 行李箱專賣';
+        $activeNav = 'category';
+    }
 }
 
 include 'header.php';
 ?>
 
     <section class="page-hero">
-        <h1>NEW IN</h1>
-        <p>最新上架商品，第一時間掌握新品動態。</p>
+        <h1><?php echo $categoryName !== '' ? htmlspecialchars($categoryName) : 'NEW IN'; ?></h1>
+        <p><?php echo $categoryName !== '' ? '依照分類瀏覽適合你的行李箱。' : '最新上架商品，第一時間掌握新品動態。'; ?></p>
         <div class="hero-actions">
             <a href="index.php" class="hero-btn">回首頁</a>
+            <?php if ($categoryName !== ''): ?>
+                <a href="new_in.php" class="hero-btn">全部商品</a>
+            <?php endif; ?>
         </div>
     </section>
 
     <section class="section-container">
-        <h2 class="section-title">NEW ARRIVALS</h2>
+        <h2 class="section-title"><?php echo $categoryName !== '' ? htmlspecialchars($categoryName) : 'NEW ARRIVALS'; ?></h2>
 
         <div class="product-grid">
             <?php
+            $imageOrderBy = sfProductImageOrder($conn, 'pi');
+            $categoryWhere = '';
+            $categoryJoin = '';
+            if ($categoryId > 0) {
+                $categoryJoin = "INNER JOIN product_category_links pcl_filter ON pcl_filter.product_id = p.product_id";
+                $categoryWhere = "AND pcl_filter.category_id = {$categoryId}";
+            }
+
             $sql = "SELECT
                         p.product_id,
                         p.name,
@@ -35,28 +64,22 @@ include 'header.php';
                             SELECT pi.image_url
                             FROM product_images pi
                             WHERE pi.product_id = p.product_id
-                            ORDER BY pi.is_main DESC, pi.sort_order ASC
+                            ORDER BY {$imageOrderBy}
                             LIMIT 1
                         ) AS image_url
                     FROM products p
+                    {$categoryJoin}
                     LEFT JOIN product_variants v ON v.product_id = p.product_id
                     WHERE p.status = 'ON SHELF'
+                    {$categoryWhere}
                     GROUP BY p.product_id
                     ORDER BY p.created_at DESC
                     LIMIT 12";
 
             $result = $conn->query($sql);
-
-            // Debug log: record SQL and any mysqli error (avoid complex sampling)
-            $debugLog = __DIR__ . '/../backend/logs/new_in_debug.log';
-            @mkdir(dirname($debugLog), 0777, true);
-            $dbg = [
-                'time' => date('Y-m-d H:i:s'),
-                'sql' => $sql,
-                'mysqli_error' => $conn->error,
-                'num_rows' => ($result ? $result->num_rows : 0),
-            ];
-            @file_put_contents($debugLog, json_encode($dbg, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+            if ($result === false) {
+                error_log('[new_in] product query failed: ' . $conn->error);
+            }
 
             if ($result && $result->num_rows > 0) {
                 while ($row = $result->fetch_assoc()) {
@@ -71,7 +94,7 @@ include 'header.php';
                     echo '</div>';
                 }
             } else {
-                echo '<p class="empty-state">目前尚無新品，請稍後再回來看看。</p>';
+                echo '<p class="empty-state">' . ($categoryName !== '' ? '這個分類目前尚無上架商品。' : '目前尚無新品，請稍後再回來看看。') . '</p>';
             }
             ?>
         </div>

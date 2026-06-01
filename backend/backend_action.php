@@ -84,6 +84,7 @@ $actions = [
     'update_promotion' => 'actions/MarketingActions.php',
     'sync_promotion_products' => 'actions/MarketingActions.php',
     'upload_promotion_banner' => 'actions/MarketingActions.php',
+    'delete_promotion_banner' => 'actions/MarketingActions.php',
     'add_category' => 'actions/CategoryActions.php',
     'update_category' => 'actions/CategoryActions.php',
     'delete_category' => 'actions/CategoryActions.php',

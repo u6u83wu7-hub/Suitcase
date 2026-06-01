@@ -1,11 +1,15 @@
 <?php
 $pageTitle = 'All Pass 行李箱專賣 | Your All-Access Pass';
 $activeNav = '';
+require_once __DIR__ . '/includes/storefront_helpers.php';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
 }
+$conn->set_charset('utf8mb4');
+
+$homepageBanners = sfFetchHomepageBanners($conn, 6);
 
 include 'header.php';
 ?>
@@ -23,6 +27,22 @@ include 'header.php';
         <div class="badge">💳 支援線上刷卡分期</div>
     </section>
 
+    <?php if (!empty($homepageBanners)): ?>
+        <section class="promo-marquee" aria-label="促銷活動">
+            <div class="promo-marquee-track">
+                <?php foreach (array_merge($homepageBanners, $homepageBanners) as $banner): ?>
+                    <a class="promo-marquee-item" href="promotion_products.php?promotion_id=<?php echo intval($banner['promotion_id']); ?>">
+                        <?php if (!empty($banner['banner_image_url'])): ?>
+                            <img src="../<?php echo htmlspecialchars(ltrim($banner['banner_image_url'], '/')); ?>" alt="<?php echo htmlspecialchars($banner['name']); ?>">
+                        <?php endif; ?>
+                        <span><?php echo htmlspecialchars($banner['name']); ?></span>
+                        <small><?php echo htmlspecialchars(date('m/d', strtotime($banner['start_at'])) . ' - ' . date('m/d', strtotime($banner['end_at']))); ?></small>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </section>
+    <?php endif; ?>
+
     <section class="section-container">
         <h2 class="section-title">FEATURED ITEMS</h2>
         
@@ -35,6 +55,7 @@ include 'header.php';
              * v = product_variants (子檔) -> 抓價格
              * i = product_images (圖床) -> 抓標記為 is_main=1 的展示圖
              */
+                     $imageOrderBy = sfProductImageOrder($conn, 'pi2');
                      $sql = "SELECT
                                                 p.product_id,
                                                 p.name,
@@ -44,7 +65,7 @@ include 'header.php';
                                                                 SELECT pi2.image_url
                                                                 FROM product_images pi2
                                                                 WHERE pi2.product_id = p.product_id
-                                                                ORDER BY pi2.sort_order ASC
+                                                                ORDER BY {$imageOrderBy}
                                                                 LIMIT 1
                                                         )
                                                 ) AS image_url

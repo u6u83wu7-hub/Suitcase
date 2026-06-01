@@ -52,7 +52,8 @@
 .chip { border: 1px solid var(--line); background: #fff; padding: 8px 14px; font-weight: 700; cursor: pointer; }
 .chip.is-selected { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px rgba(219, 107, 107, 0.15); }
 .chip.is-disabled { opacity: 0.4; cursor: not-allowed; text-decoration: line-through; }
-.color-chip { width: 38px; height: 38px; border-radius: 50%; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.color-chip { min-width: 38px; min-height: 38px; display: inline-flex; align-items: center; justify-content: center; }
+.color-text-chip { border-radius: 0; padding: 9px 14px; min-width: 74px; height: auto; line-height: 1.2; text-align: center; }
 .color-swatch { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #ddd; background: #f3f4f6; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 
@@ -72,6 +73,17 @@
 .detail-copy { margin-top: 24px; color: #555; line-height: 1.8; }
 .detail-copy h2 { font-size: 15px; color: #222; margin-bottom: 8px; }
 .detail-info-box { margin-top: 20px; padding: 16px; border: 1px solid var(--line); background: #f9fafb; }
+.detail-faq { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 24px; }
+.detail-section-heading span { display: block; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 1px; margin-bottom: 4px; }
+.detail-section-heading h2 { margin: 0 0 14px; font-size: 20px; color: var(--ink); }
+.faq-list { display: grid; gap: 10px; }
+.faq-item { border: 1px solid var(--line); background: #fff; }
+.faq-item summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; cursor: pointer; font-weight: 800; color: var(--ink); }
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after { content: '+'; color: var(--accent); font-size: 20px; line-height: 1; }
+.faq-item[open] summary::after { content: '-'; }
+.faq-item summary small { flex: 0 0 auto; color: #9ca3af; font-size: 12px; font-weight: 700; }
+.faq-item p { margin: 0; padding: 0 16px 16px; color: #555; line-height: 1.8; }
 
 .toast { position: fixed; right: 20px; bottom: 24px; background: #111; color: #fff; padding: 12px 16px; opacity: 0; transform: translateY(10px); transition: all 0.3s ease; z-index: 2000; }
 .toast.show { opacity: 1; transform: translateY(0); }

@@ -77,7 +77,9 @@ $imageOrderParts = [];
 if (in_array('is_main', $imageCols, true)) {
     $imageOrderParts[] = 'pi.is_main DESC';
 }
-if (in_array('display_order', $imageCols, true)) {
+if (in_array('sort_order', $imageCols, true)) {
+    $imageOrderParts[] = 'pi.sort_order ASC';
+} elseif (in_array('display_order', $imageCols, true)) {
     $imageOrderParts[] = 'pi.display_order ASC';
 }
 if (in_array('image_id', $imageCols, true)) {

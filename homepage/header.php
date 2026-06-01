@@ -5,6 +5,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/storefront_helpers.php';
 
 if (isset($conn)) {
     apRunPromotionSync($conn);
@@ -44,6 +45,11 @@ if (!isset($pageTitle)) {
 if (!isset($activeNav)) {
     $activeNav = '';
 }
+
+$headerCategories = [];
+if (isset($conn) && $conn instanceof mysqli && !$conn->connect_error) {
+    $headerCategories = sfFetchCategories($conn);
+}
 ?>
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -80,6 +86,7 @@ if (!isset($activeNav)) {
         .dropdown { position: relative; display: inline-block; cursor: pointer; color: #333; font-size: 15px; font-weight: 500; letter-spacing: 1px; padding: 5px 0; transition: color 0.3s; }
         .dropdown::after { content: ' ▾'; font-size: 10px; color: #999; }
         .dropdown:hover { color: #db6b6b; }
+        .dropdown.is-active { color: #db6b6b; }
         .icon-dropdown::after { content: ''; }
         .icon-dropdown .dropdown-content { right: 0; left: auto; transform: none; min-width: 130px; border-top: 2px solid #db6b6b; }
         .dropdown-content { display: none; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); background-color: #fff; min-width: 160px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: 2px solid #db6b6b; padding: 10px 0; z-index: 1001; }
@@ -99,6 +106,13 @@ if (!isset($activeNav)) {
 
         .trust-badges { display: flex; justify-content: center; gap: 80px; background: #fff; padding: 30px 5%; border-bottom: 1px solid #f0f0f0; }
         .badge { display: flex; align-items: center; gap: 10px; font-size: 15px; color: #666; font-weight: 500; }
+        .promo-marquee { overflow: hidden; background: #111827; color: #fff; border-bottom: 1px solid #222; }
+        .promo-marquee-track { display: flex; width: max-content; animation: promoMarquee 28s linear infinite; }
+        .promo-marquee:hover .promo-marquee-track { animation-play-state: paused; }
+        .promo-marquee-item { display: inline-flex; align-items: center; gap: 12px; padding: 10px 28px; white-space: nowrap; font-weight: 800; letter-spacing: 1px; }
+        .promo-marquee-item img { width: 56px; height: 34px; object-fit: cover; border-radius: 4px; background: #374151; }
+        .promo-marquee-item small { color: #fca5a5; font-weight: 700; letter-spacing: 0; }
+        @keyframes promoMarquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
         .page-hero { padding: 160px 5% 70px; background: linear-gradient(to bottom, rgba(26, 26, 26, 0.95), rgba(26, 26, 26, 0.78)), url('../img/輪播1.png') center/cover no-repeat; color: #fff; text-align: center; }
         .page-hero h1 { font-size: 4rem; letter-spacing: 10px; margin-bottom: 16px; }
@@ -172,24 +186,17 @@ if (!isset($activeNav)) {
         <div class="header-bottom">
             <nav class="nav-links">
                 <a href="new_in.php" class="nav-text-link <?php echo $activeNav === 'new_in' ? 'is-active' : ''; ?>">NEW IN 新品</a>
-                <div class="dropdown">款式材質
+                <div class="dropdown <?php echo $activeNav === 'category' ? 'is-active' : ''; ?>">商品分類
                     <div class="dropdown-content">
-                        <a href="#">硬殼 (Hard Shell)</a>
-                        <a href="#">軟殼 (Soft Shell)</a>
-                    </div>
-                </div>
-                <div class="dropdown">尺寸挑選
-                    <div class="dropdown-content">
-                        <a href="#">登機箱 (20吋以下)</a>
-                        <a href="#">中型箱 (24-26吋)</a>
-                        <a href="#">大型箱 (28吋以上)</a>
-                    </div>
-                </div>
-                <div class="dropdown">開合構造
-                    <div class="dropdown-content">
-                        <a href="#">輕量拉鍊款</a>
-                        <a href="#">堅固鋁框款</a>
-                        <a href="#">便利前開款</a>
+                        <?php if (!empty($headerCategories)): ?>
+                            <?php foreach ($headerCategories as $category): ?>
+                                <a href="<?php echo htmlspecialchars(sfCategoryUrl($category['category_id'])); ?>">
+                                    <?php echo htmlspecialchars($category['name']); ?>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <a href="new_in.php">全部商品</a>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <a href="promotions.php" class="nav-text-link sale-link <?php echo $activeNav === 'promotions' ? 'is-active' : ''; ?>">SALE 優惠專區</a>

@@ -1,5 +1,3 @@
-<?php echo "現在伺服器顯示的時間是: " . date('Y-m-d H:i:s'); ?>
-
 <?php
 require_once __DIR__ . '/auth_guard.php';
 require_once __DIR__ . '/../homepage/includes/promotion_price_sync.php';
@@ -137,6 +135,18 @@ if ($activeResult) {
 	</div>
 
 	<section class="pm-card">
+		<h3 class="pm-section-title">首頁跑馬燈 Banner</h3>
+		<div style="display:grid; gap:12px; color:#475569; line-height:1.8;">
+			<div>要讓首頁出現跑馬燈，請先建立活動，再到下方活動清單按「首頁跑馬燈」上傳 Banner 圖片，並將「首頁顯示」設為「是」。</div>
+			<div style="display:flex; flex-wrap:wrap; gap:10px;">
+				<span class="pm-badge pm-on">啟用活動</span>
+				<span class="pm-badge pm-on">活動期間內</span>
+				<span class="pm-badge pm-on">首頁顯示：是</span>
+			</div>
+		</div>
+	</section>
+
+	<section class="pm-card">
 		<h3 class="pm-section-title">活動篩選</h3>
 		<form class="pm-grid" action="backend.php" method="GET">
 			<input type="hidden" name="page" value="marketing">
@@ -182,7 +192,7 @@ if ($activeResult) {
 						<th style="width:120px;">狀態</th>
 						<th style="width:90px;">啟用</th>
 						<th style="width:90px;">商品數</th>
-						<th style="width:90px;">Banner</th>
+						<th style="width:110px;">首頁跑馬燈</th>
 						<th style="width:200px;">操作</th>
 					</tr>
 				</thead>
@@ -239,7 +249,7 @@ if ($activeResult) {
 											編輯
 										</button>
 										<button class="pm-btn pm-btn-sub pm-btn-sm js-bind-products" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">商品綁定</button>
-										<button class="pm-btn pm-btn-edit pm-btn-sm js-upload-banner" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">Banner</button>
+										<button class="pm-btn pm-btn-edit pm-btn-sm js-upload-banner" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">首頁跑馬燈</button>
 									</div>
 								</td>
 							</tr>
@@ -309,8 +319,11 @@ if ($activeResult) {
 .product-card .product-sub { font-size: 12px; color: #64748b; }
 .product-card.is-selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
 .product-empty { grid-column: 1 / -1; padding: 18px; text-align: center; color: #94a3b8; }
-.banner-preview { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.banner-preview img { width: 160px; height: 60px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; }
+.banner-preview { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.banner-item { width: 180px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; background: #f8fafc; display: grid; gap: 8px; }
+.banner-preview img { width: 100%; height: 68px; object-fit: cover; border-radius: 6px; border: 1px solid #e2e8f0; background: #fff; }
+.banner-delete-form { margin: 0; }
+.banner-delete-form button { width: 100%; justify-content: center; }
 </style>
 
 <div class="marketing-modal" id="promotionModal">
@@ -340,7 +353,7 @@ if ($activeResult) {
 				<div class="pm-col-12">
 					<label for="promotion_image">活動圖片（必填）</label>
 					<input class="pm-file-input" type="file" id="promotion_image" name="promotion_image" accept="image/*" required>
-					<div style="font-size:12px; color:#64748b; margin-top:6px;">活動圖片會作為活動主圖，即使不放首頁輪播也必須上傳。</div>
+					<div style="font-size:12px; color:#64748b; margin-top:6px;">活動圖片會作為活動主圖；若要顯示在首頁跑馬燈，建立活動後請在活動清單按「首頁跑馬燈」上傳 Banner。</div>
 				</div>
 				<div class="pm-col-6" style="grid-column: span 6;">
 					<label for="promotion_active">啟用活動</label>
@@ -487,7 +500,7 @@ if ($activeResult) {
 <div class="marketing-modal" id="bannerModal">
 	<div class="modal-panel">
 		<div class="modal-header">
-			<div class="modal-title" id="bannerTitle">Banner 版位設定</div>
+			<div class="modal-title" id="bannerTitle">首頁跑馬燈 Banner 設定</div>
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeBannerModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
@@ -497,6 +510,7 @@ if ($activeResult) {
 				<div class="pm-col-12">
 					<label for="banner_image">上傳 Banner 圖片</label>
 					<input class="pm-file-input" type="file" id="banner_image" name="banner_image" accept="image/*" required>
+					<div style="font-size:12px; color:#64748b; margin-top:6px;">建議使用寬版橫幅圖，例如 1440 x 420 或相同比例。啟用後會出現在首頁 Hero 下方的跑馬燈。</div>
 				</div>
 				<div class="pm-col-6" style="grid-column: span 6;">
 					<label for="is_show_on_homepage">首頁顯示</label>
@@ -589,7 +603,7 @@ document.querySelectorAll('.js-upload-banner').forEach(btn => {
 		const promotionId = btn.dataset.id;
 		const promotionName = btn.dataset.name || '';
 		document.getElementById('bannerPromotionId').value = promotionId;
-		document.getElementById('bannerTitle').textContent = 'Banner 版位設定 - ' + promotionName;
+		document.getElementById('bannerTitle').textContent = '首頁跑馬燈 Banner 設定 - ' + promotionName;
 		renderBannerPreview(promotionId);
 		bannerModal.style.display = 'flex';
 	});
@@ -815,10 +829,29 @@ function renderBannerPreview(promotionId) {
 		return;
 	}
 	banners.forEach(url => {
+		const item = document.createElement('div');
+		item.className = 'banner-item';
+
 		const img = document.createElement('img');
 		img.src = '../' + url;
 		img.alt = 'Banner';
-		preview.appendChild(img);
+		item.appendChild(img);
+
+		const form = document.createElement('form');
+		form.className = 'banner-delete-form';
+		form.action = 'backend_action.php';
+		form.method = 'POST';
+		form.innerHTML = '<input type="hidden" name="action" value="delete_promotion_banner">' +
+			'<input type="hidden" name="promotion_id" value="' + promotionId + '">' +
+			'<input type="hidden" name="banner_image_url" value="' + url.replace(/"/g, '&quot;') + '">' +
+			'<button class="pm-btn pm-btn-sub pm-btn-sm" type="submit">刪除</button>';
+		form.addEventListener('submit', event => {
+			if (!confirm('確定要刪除這張首頁跑馬燈 Banner 嗎？')) {
+				event.preventDefault();
+			}
+		});
+		item.appendChild(form);
+		preview.appendChild(item);
 	});
 }
 

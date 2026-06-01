@@ -1,7 +1,7 @@
 <?php
-// Temporary debug hardening: ensure fatal errors are captured even when host hides errors
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 error_reporting(E_ALL);
 
 if (defined('MYSQLI_REPORT_OFF') && function_exists('mysqli_report')) {
@@ -23,7 +23,7 @@ register_shutdown_function(function () {
         if (!headers_sent()) {
             http_response_code(500);
             echo '<h2 style="font-family:Arial,sans-serif;padding:20px;">商品頁發生錯誤</h2>';
-            echo '<p style="font-family:Arial,sans-serif;padding:0 20px 20px;">錯誤已記錄，請查看 backend/logs/product_detail_debug.log</p>';
+            echo '<p style="font-family:Arial,sans-serif;padding:0 20px 20px;">請稍後再試，或回到首頁重新瀏覽商品。</p>';
         }
     }
 });
@@ -37,6 +37,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/storefront_helpers.php';
 
 $cartNotice = '';
 $cartNoticeType = 'success';
@@ -52,6 +53,7 @@ $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
 }
+$conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);
 
 if (!empty($_SESSION['user_id'])) {
@@ -118,6 +120,7 @@ $productSelect = [
     'product_id',
     'name',
     in_array('description', $productCols, true) ? 'description' : "'' AS description",
+    in_array('warranty_info', $productCols, true) ? 'warranty_info' : "'' AS warranty_info",
     in_array('warranty_months', $productCols, true) ? 'warranty_months' : 'NULL AS warranty_months',
     in_array('status', $productCols, true) ? 'status' : "'' AS status",
     in_array('is_featured', $productCols, true) ? 'is_featured' : '0 AS is_featured',
@@ -456,6 +459,22 @@ if (tableExists($conn, 'categories') && tableExists($conn, 'product_category_lin
     }
 }
 
+$productFaqs = [];
+if (tableExists($conn, 'product_qa')) {
+    $faqSql = "SELECT question, answer, qa_type, product_id
+               FROM product_qa
+               WHERE qa_type = 'GENERAL'
+                  OR product_id IS NULL
+                  OR product_id = {$id}
+               ORDER BY CASE WHEN product_id = {$id} THEN 0 ELSE 1 END, created_at DESC, qa_id DESC";
+    $faqRes = safeQuery($conn, $faqSql, 'productFaqs');
+    if ($faqRes) {
+        while ($row = $faqRes->fetch_assoc()) {
+            $productFaqs[] = $row;
+        }
+    }
+}
+
 include 'header.php';
 ?>
 
@@ -545,14 +564,13 @@ include 'header.php';
                         <?php foreach ($colorOptions as $color => $opt): ?>
                             <button
                                 type="button"
-                                class="chip color-chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultColor === $color) ? ' is-selected' : ''; ?>"
+                                class="chip color-chip color-text-chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultColor === $color) ? ' is-selected' : ''; ?>"
                                 data-color-option="<?php echo htmlspecialchars($color); ?>"
                                 data-image-url="<?php echo htmlspecialchars($opt['image_url']); ?>"
                                 title="<?php echo htmlspecialchars($color); ?>"
                                 <?php echo $opt['in_stock'] ? '' : 'disabled'; ?>
                             >
-                                <span class="color-swatch" data-color="<?php echo htmlspecialchars($color); ?>"></span>
-                                <span class="visually-hidden"><?php echo htmlspecialchars($color); ?></span>
+                                <?php echo htmlspecialchars($color); ?>
                             </button>
                         <?php endforeach; ?>
                     </div>
@@ -617,6 +635,33 @@ include 'header.php';
                 <section class="detail-copy">
                     <h2>保固資訊</h2>
                     <p><?php echo intval($product['warranty_months']); ?> 個月</p>
+                </section>
+            <?php endif; ?>
+
+            <?php if (!empty($product['warranty_info'])): ?>
+                <section class="detail-copy">
+                    <h2>售後與保固說明</h2>
+                    <p><?php echo nl2br(htmlspecialchars($product['warranty_info'])); ?></p>
+                </section>
+            <?php endif; ?>
+
+            <?php if (!empty($productFaqs)): ?>
+                <section class="detail-faq">
+                    <div class="detail-section-heading">
+                        <span>FAQ</span>
+                        <h2>常見問題</h2>
+                    </div>
+                    <div class="faq-list">
+                        <?php foreach ($productFaqs as $faq): ?>
+                            <details class="faq-item">
+                                <summary>
+                                    <span><?php echo htmlspecialchars($faq['question']); ?></span>
+                                    <small><?php echo intval($faq['product_id'] ?? 0) === $id ? '商品專屬' : '通用問題'; ?></small>
+                                </summary>
+                                <p><?php echo nl2br(htmlspecialchars($faq['answer'])); ?></p>
+                            </details>
+                        <?php endforeach; ?>
+                    </div>
                 </section>
             <?php endif; ?>
         </div>
