@@ -21,7 +21,7 @@ $page = isset($_GET['page']) ? $_GET['page'] : 'products';
 
 // White-list allowed pages to avoid path traversal
 $allowed = [
-    'dashboard', 'products', 'categories', 'orders', 'members', 'marketing', 'system', 'profile', 'edit_product'
+    'dashboard', 'products', 'categories', 'orders', 'members', 'customer_service', 'marketing', 'system', 'profile', 'edit_product'
 ];
 if (!in_array($page, $allowed)) {
     $page = 'products';
@@ -74,7 +74,8 @@ if (!in_array($page, $allowed)) {
             <li><a href="backend.php?page=products" class="<?php echo $page=='products' ? 'active' : ''; ?>">📦 商品管理</a></li>
             <li><a href="backend.php?page=categories" class="<?php echo $page=='categories' ? 'active' : ''; ?>">🏷️ 分類管理</a></li>
             <li><a href="backend.php?page=orders" class="<?php echo $page=='orders' ? 'active' : ''; ?>">🧾 訂單管理</a></li>
-            <li><a href="backend.php?page=members" class="<?php echo $page=='members' ? 'active' : ''; ?>">👥 會員與客服管理</a></li>
+            <li><a href="backend.php?page=members" class="<?php echo $page=='members' ? 'active' : ''; ?>">👥 會員管理</a></li>
+            <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>">💬 客服管理</a></li>
             <li><a href="backend.php?page=marketing" class="<?php echo $page=='marketing' ? 'active' : ''; ?>">📢 行銷與內容管理</a></li>
             <li><a href="backend.php?page=system" class="<?php echo $page=='system' ? 'active' : ''; ?>">⚙️ 系統與權限管理</a></li>
             <li style="margin-top:12px;"><a href="backend.php?page=profile" class="<?php echo $page=='profile' ? 'active' : ''; ?>">🔐 管理者資料</a></li>

@@ -14,6 +14,15 @@ if (!isset($_SESSION['user_id'])) {
 $userId = intval($_SESSION['user_id']);
 $orderNumber = isset($_GET['order_number']) ? trim($_GET['order_number']) : '';
 
+$orderStatusLabels = [
+    'PENDING' => '待處理',
+    'PROCESSING' => '處理中',
+    'SHIPPED' => '已出貨',
+    'DELIVERED' => '已送達',
+    'COMPLETED' => '已完成',
+    'CANCELLED' => '已取消',
+];
+
 if ($orderNumber === '') {
     header('Location: profile.php#order-history');
     exit;
@@ -86,7 +95,7 @@ include 'header.php';
             </div>
             <div style="padding:16px; border-radius:12px; background:#fff; border:1px solid #eee;">
                 <div style="font-size:13px; color:#666; margin-bottom:6px;">訂單狀態</div>
-                <div style="font-size:22px; font-weight:800; color:#222;"><?php echo htmlspecialchars($order['status']); ?></div>
+                <div style="font-size:22px; font-weight:800; color:#222;"><?php echo htmlspecialchars($orderStatusLabels[$order['status']] ?? $order['status']); ?></div>
             </div>
             <div style="padding:16px; border-radius:12px; background:#fff; border:1px solid #eee;">
                 <div style="font-size:13px; color:#666; margin-bottom:6px;">收件人</div>

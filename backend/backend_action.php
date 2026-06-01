@@ -89,6 +89,8 @@ $actions = [
     'delete_category' => 'actions/CategoryActions.php',
     'add_product_to_category' => 'actions/CategoryActions.php',      // 👈 新增這行
     'remove_product_from_category' => 'actions/CategoryActions.php', // 👈 新增這行
+    'reply_ticket_message' => 'actions/CustomerServiceActions.php',
+    'add_product_qa' => 'actions/CustomerServiceActions.php',
 ];
 
 // 分发请求

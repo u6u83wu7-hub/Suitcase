@@ -13,6 +13,15 @@ if (!isset($_SESSION['user_id'])) {
 
 $userId = intval($_SESSION['user_id']);
 
+$orderStatusLabels = [
+    'PENDING' => '待處理',
+    'PROCESSING' => '處理中',
+    'SHIPPED' => '已出貨',
+    'DELIVERED' => '已送達',
+    'COMPLETED' => '已完成',
+    'CANCELLED' => '已取消',
+];
+
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
@@ -187,15 +196,26 @@ include 'header.php';
                                 <th style="padding:8px 6px;">狀態</th>
                                 <th style="padding:8px 6px;">金額</th>
                                 <th style="padding:8px 6px;">時間</th>
+                                <th style="padding:8px 6px;">操作</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($orderRows as $o): ?>
                                 <tr style="border-bottom:1px solid #f3f3f3;">
                                     <td style="padding:8px 6px;"><a href="order_detail.php?order_number=<?php echo urlencode($o['order_number'] !== '' ? $o['order_number'] : ('#' . $o['order_id'])); ?>" style="color:#db6b6b; font-weight:700; text-decoration:none;"><?php echo htmlspecialchars($o['order_number'] !== '' ? $o['order_number'] : ('#' . $o['order_id'])); ?></a></td>
-                                    <td style="padding:8px 6px;"><?php echo htmlspecialchars($o['status']); ?></td>
+                                    <td style="padding:8px 6px;"><?php echo htmlspecialchars($orderStatusLabels[$o['status']] ?? $o['status']); ?></td>
                                     <td style="padding:8px 6px;">NT$ <?php echo number_format(floatval($o['total_amount'])); ?></td>
                                     <td style="padding:8px 6px;"><?php echo htmlspecialchars($o['created_at']); ?></td>
+                                    <td style="padding:8px 6px;">
+                                        <?php if ($o['status'] === 'DELIVERED'): ?>
+                                            <form method="POST" action="complete_order.php" style="margin:0;">
+                                                <input type="hidden" name="order_id" value="<?php echo intval($o['order_id']); ?>">
+                                                <button type="submit" style="padding:6px 10px; border-radius:999px; background:#111; color:#fff; font-weight:700; font-size:12px;">完成訂單</button>
+                                            </form>
+                                        <?php else: ?>
+                                            <span style="color:#94a3b8; font-size:12px;">-</span>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>

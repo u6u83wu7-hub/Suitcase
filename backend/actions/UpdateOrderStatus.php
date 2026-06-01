@@ -1,9 +1,11 @@
 <?php
+// UpdateOrderStatus.php - 處理訂單狀態更新的 action
+//版本1
 if (!in_array($action, ['update_order_status', 'bulk_update_orders'], true)) {
     return;
 }
 
-$allowedStatuses = ['PENDING', 'PAID', 'SHIPPING', 'COMPLETED', 'CANCELLED'];
+$allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
 $newStatus = isset($_POST['status']) ? trim($_POST['status']) : '';
 
 if (!in_array($newStatus, $allowedStatuses, true)) {
@@ -47,6 +49,42 @@ function buildTrackingNumber($carrier, $number) {
 }
 
 $trackingNumber = buildTrackingNumber($shippingCarrier, $trackingNumberInput);
+
+function ouTableExists($conn, $tableName) {
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return ($res && $res->num_rows > 0);
+}
+
+function ouNotifyShipping($conn, $orderId) {
+    $stmt = $conn->prepare("SELECT o.order_id, o.order_number, o.user_id, u.email, u.name
+                            FROM orders o
+                            LEFT JOIN users u ON u.user_id = o.user_id
+                            WHERE o.order_id = ?
+                            LIMIT 1");
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    if (!$row) {
+        return;
+    }
+
+    $orderNo = $row['order_number'] !== null && $row['order_number'] !== '' ? $row['order_number'] : ('#' . $row['order_id']);
+    $title = '訂單已出貨通知';
+    $message = '您的商品已出貨。訂單編號：' . $orderNo . '。';
+
+    if (ouTableExists($conn, 'user_notifications')) {
+        $insert = $conn->prepare("INSERT INTO user_notifications (user_id, title, message) VALUES (?, ?, ?)");
+        $insert->bind_param("iss", $row['user_id'], $title, $message);
+        $insert->execute();
+    }
+
+    if (!empty($row['email'])) {
+        $subject = 'All Pass 通知 - 您的商品已出貨';
+        $headers = "Content-Type: text/plain; charset=UTF-8\r\n";
+        @mail($row['email'], $subject, $message, $headers);
+    }
+}
 
 $conn->begin_transaction();
 
@@ -119,6 +157,10 @@ try {
             if (!$updateDetailStmt->execute()) {
                 throw new Exception('Order status update failed.');
             }
+        }
+
+        if ($newStatus === 'SHIPPED' && $currentStatus !== 'SHIPPED') {
+            ouNotifyShipping($conn, $orderId);
         }
     }
 

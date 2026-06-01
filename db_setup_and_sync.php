@@ -163,7 +163,7 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `shipping_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    `status` VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    `status` ENUM('PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'PENDING',
     `recipient_name` VARCHAR(100) NOT NULL,
     `recipient_phone` VARCHAR(50) NOT NULL,
     `shipping_address` TEXT NOT NULL,
@@ -179,6 +179,17 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     INDEX `idx_orders_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_orders);
+
+$statusColRes = $conn->query("SHOW COLUMNS FROM `orders` LIKE 'status'");
+if ($statusColRes && $statusColRes->num_rows > 0) {
+    $statusCol = $statusColRes->fetch_assoc();
+    $statusType = strtolower((string)$statusCol['Type']);
+    if (strpos($statusType, 'enum') === false) {
+        $conn->query("ALTER TABLE `orders` MODIFY COLUMN `status` ENUM('PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'PENDING'");
+    }
+    $conn->query("UPDATE `orders` SET `status` = 'PROCESSING' WHERE `status` = 'PAID'");
+    $conn->query("UPDATE `orders` SET `status` = 'SHIPPED' WHERE `status` = 'SHIPPING'");
+}
 
 if (!columnExists($conn, 'orders', 'order_number')) {
     $conn->query("ALTER TABLE `orders` ADD COLUMN `order_number` VARCHAR(50) NULL AFTER `order_id`");
@@ -230,6 +241,75 @@ if (!columnExists($conn, 'order_items', 'size_inches')) {
 if (!columnExists($conn, 'order_items', 'locked_price')) {
     $conn->query("ALTER TABLE `order_items` ADD COLUMN `locked_price` DECIMAL(10,2) NOT NULL AFTER `size_inches`");
 }
+
+$sql_customer_tickets = "CREATE TABLE IF NOT EXISTS `customer_tickets` (
+    `ticket_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `product_id` INT NULL,
+    `status` ENUM('OPEN','ANSWERED','CLOSED') NOT NULL DEFAULT 'OPEN',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_customer_tickets_user_id` (`user_id`),
+    INDEX `idx_customer_tickets_status` (`status`),
+    INDEX `idx_customer_tickets_product_id` (`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_customer_tickets);
+
+$sql_ticket_messages = "CREATE TABLE IF NOT EXISTS `ticket_messages` (
+    `message_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `ticket_id` INT NOT NULL,
+    `sender_type` ENUM('USER','ADMIN') NOT NULL,
+    `sender_id` INT NOT NULL,
+    `product_id` INT NULL,
+    `message_text` TEXT NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_ticket_messages_ticket_id` (`ticket_id`),
+    INDEX `idx_ticket_messages_product_id` (`product_id`),
+    INDEX `idx_ticket_messages_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_ticket_messages);
+
+if (!columnExists($conn, 'ticket_messages', 'product_id')) {
+    $conn->query("ALTER TABLE `ticket_messages` ADD COLUMN `product_id` INT NULL AFTER `sender_id`");
+}
+
+$sql_product_qa = "CREATE TABLE IF NOT EXISTS `product_qa` (
+    `qa_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `product_id` INT NULL,
+    `question` TEXT NOT NULL,
+    `answer` TEXT NOT NULL,
+    `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_product_qa_product_id` (`product_id`),
+    INDEX `idx_product_qa_type` (`qa_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_product_qa);
+
+if (!columnExists($conn, 'product_qa', 'product_id')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `product_id` INT NULL AFTER `qa_id`");
+}
+if (!columnExists($conn, 'product_qa', 'question')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `question` TEXT NOT NULL AFTER `product_id`");
+}
+if (!columnExists($conn, 'product_qa', 'answer')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `answer` TEXT NOT NULL AFTER `question`");
+}
+if (!columnExists($conn, 'product_qa', 'qa_type')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT' AFTER `answer`");
+}
+
+$sql_user_notifications = "CREATE TABLE IF NOT EXISTS `user_notifications` (
+    `notification_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `title` VARCHAR(120) NOT NULL,
+    `message` TEXT NOT NULL,
+    `is_read` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_user_notifications_user_id` (`user_id`),
+    INDEX `idx_user_notifications_is_read` (`is_read`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_user_notifications);
 
 $sql_member_details = "CREATE TABLE IF NOT EXISTS `user_member_details` (
     `member_detail_id` INT AUTO_INCREMENT PRIMARY KEY,
