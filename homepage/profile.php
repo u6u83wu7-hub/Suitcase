@@ -77,17 +77,25 @@ if (tableExists($conn, 'cart_items')) {
     );
 }
 
-// 收藏
+// 📊 修正版：收藏（改用 JOIN 順便撈出商品名稱）
 $favoriteRows = [];
 if (tableExists($conn, 'user_favorites')) {
     $favoriteRows = fetchAssocRows(
         $conn,
-        "SELECT favorite_id, product_id, created_at FROM user_favorites WHERE user_id = {$userId} ORDER BY created_at DESC"
+        "SELECT f.favorite_id, f.product_id, f.created_at, p.name AS product_name 
+         FROM user_favorites f
+         LEFT JOIN products p ON f.product_id = p.product_id
+         WHERE f.user_id = {$userId} 
+         ORDER BY f.created_at DESC"
     );
 } elseif (tableExists($conn, 'favorites')) {
     $favoriteRows = fetchAssocRows(
         $conn,
-        "SELECT favorite_id, product_id, created_at FROM favorites WHERE user_id = {$userId} ORDER BY created_at DESC"
+        "SELECT f.favorite_id, f.product_id, f.created_at, p.name AS product_name 
+         FROM favorites f
+         LEFT JOIN products p ON f.product_id = p.product_id
+         WHERE f.user_id = {$userId} 
+         ORDER BY f.created_at DESC"
     );
 }
 
@@ -173,17 +181,24 @@ include 'header.php';
         </section>
 
         <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
-            <h2 style="font-size:20px; margin-bottom:12px;">收藏</h2>
-            <?php if (!empty($favoriteRows)): ?>
-                <ul style="padding-left:16px; line-height:1.8; color:#444;">
-                    <?php foreach ($favoriteRows as $item): ?>
-                        <li>商品 ID #<?php echo intval($item['product_id']); ?>，收藏於 <?php echo htmlspecialchars($item['created_at']); ?></li>
-                    <?php endforeach; ?>
-                </ul>
-            <?php else: ?>
-                <p style="color:#777;">目前尚無收藏商品。</p>
-            <?php endif; ?>
-        </section>
+    <h2 style="font-size:20px; margin-bottom:12px;">收藏</h2>
+    <?php if (!empty($favoriteRows)): ?>
+        <ul style="padding-left:16px; line-height:1.8; color:#444;">
+            <?php foreach ($favoriteRows as $item): ?>
+                <li style="margin-bottom: 8px;">
+                    <a href="product_detail.php?id=<?php echo intval($item['product_id']); ?>" style="color:#db6b6b; font-weight:700; text-decoration:none; hover:text-decoration:underline;">
+                        <?php echo htmlspecialchars($item['product_name'] ?? '未命名商品(ID:#' . $item['product_id'] . ')'); ?>
+                    </a>
+                    <span style="color:#888; font-size:12px; margin-left:8px;">
+                        (收藏於 <?php echo date('Y-m-d H:i', strtotime($item['created_at'])); ?>)
+                    </span>
+                </li>
+            <?php endforeach; ?>
+        </ul>
+    <?php else: ?>
+        <p style="color:#777;">目前尚無收藏商品。</p>
+    <?php endif; ?>
+</section>
 
         <section id="order-history" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
             <h2 style="font-size:20px; margin-bottom:12px;">購買紀錄</h2>

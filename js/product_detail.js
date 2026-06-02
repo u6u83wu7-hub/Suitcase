@@ -308,15 +308,51 @@ if (thumbList) {
     });
 }
 
+// 💡 真實發送 AJAX 儲存到資料庫的版本
 if (favoriteBtn && toast) {
-    favoriteBtn.addEventListener('click', () => {
-        const isActive = favoriteBtn.classList.toggle('is-active');
-        favoriteBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    favoriteBtn.addEventListener('click', (e) => {
+        e.preventDefault(); // 防止按鈕觸發表單送出
+
+        if (typeof isLoggedIn !== 'undefined' && !isLoggedIn) {
+            alert('請先登入會員才能加入收藏！');
+            window.location.href = 'login.php';
+            return;
+        }
+
         favoriteBtn.classList.add('is-animating');
-        toast.textContent = isActive ? '已加入收藏' : '已移除收藏';
-        toast.classList.add('show');
-        setTimeout(() => favoriteBtn.classList.remove('is-animating'), 150);
-        setTimeout(() => toast.classList.remove('show'), 2000);
+
+        // 準備傳送給後端的資料
+        const formData = new URLSearchParams();
+        formData.append('action', 'toggle_favorite');
+        if (typeof currentProductId !== 'undefined') {
+            formData.append('product_id', currentProductId);
+        }
+
+        // 發送請求到 PHP
+        fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData.toString()
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                const isAdded = data.status === 'added';
+                // 根據後端回傳的狀態來切換 UI
+                favoriteBtn.classList.toggle('is-active', isAdded);
+                favoriteBtn.setAttribute('aria-pressed', isAdded ? 'true' : 'false');
+                
+                toast.textContent = isAdded ? '已加入收藏' : '已移除收藏';
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 2000);
+            } else {
+                alert('操作失敗：' + (data.error || '未知錯誤'));
+            }
+        })
+        .catch(err => console.error('收藏發生錯誤:', err))
+        .finally(() => {
+            setTimeout(() => favoriteBtn.classList.remove('is-animating'), 150);
+        });
     });
 }
 

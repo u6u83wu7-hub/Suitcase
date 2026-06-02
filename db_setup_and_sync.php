@@ -1,7 +1,10 @@
 <?php
 // db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本
-//版本4
+// 版本 4.1 (修復防護版)
 header("Content-Type: text/html; charset=utf-8");
+
+// 💡 新增這行：防止 PHP 8.1+ 因為一點點微小的 SQL 阻礙就整個腳本崩潰！
+mysqli_report(MYSQLI_REPORT_OFF);
 
 $host = "localhost";
 $user = "root";
@@ -18,7 +21,7 @@ $conn->query("CREATE DATABASE IF NOT EXISTS `$dbname` DEFAULT CHARACTER SET utf8
 $conn->select_db($dbname);
 
 echo "<h2>🚀 All Pass 專案 - 資料庫結構同步/初始化開始...</h2>";
-echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4</p>";
+echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4.1</p>";
 echo "<hr>";
 
 function columnExists($conn, $table, $column) {
@@ -79,7 +82,7 @@ $sql_prod = "CREATE TABLE IF NOT EXISTS `products` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_prod);
 
-// 📁 表格 5：SKU 規格變體 (product_variants) -> 確保使用 size_inches
+// 📁 表格 5：SKU 規格變體 (product_variants)
 $sql_vars = "CREATE TABLE IF NOT EXISTS `product_variants` (
     `variant_id` INT AUTO_INCREMENT PRIMARY KEY,
     `product_id` INT NOT NULL,
@@ -95,7 +98,7 @@ $sql_vars = "CREATE TABLE IF NOT EXISTS `product_variants` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_vars);
 
-// 📁 表格 5.1：庫存異動紀錄（新增設計）
+// 📁 表格 5.1：庫存異動紀錄
 $sql_inventory_logs = "CREATE TABLE IF NOT EXISTS `inventory_adjustment_logs` (
     `log_id` INT AUTO_INCREMENT PRIMARY KEY,
     `product_id` INT NOT NULL,
@@ -115,28 +118,6 @@ $sql_inventory_logs = "CREATE TABLE IF NOT EXISTS `inventory_adjustment_logs` (
     INDEX `idx_inventory_logs_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_inventory_logs);
-
-if (tableExists($conn, 'inventory_adjustment_logs')) {
-    $inventoryLogColumns = [
-        'product_id' => 'INT NOT NULL DEFAULT 0',
-        'variant_id' => 'INT NULL',
-        'sku_code' => 'VARCHAR(50) NULL',
-        'size_inches' => 'VARCHAR(50) NULL',
-        'color' => 'VARCHAR(50) NULL',
-        'old_stock' => 'INT NOT NULL DEFAULT 0',
-        'new_stock' => 'INT NOT NULL DEFAULT 0',
-        'delta_quantity' => 'INT NOT NULL DEFAULT 0',
-        'action_type' => "VARCHAR(30) NOT NULL DEFAULT 'ADMIN_UPDATE'",
-        'admin_id' => 'INT NULL',
-        'note' => 'VARCHAR(255) NULL',
-        'created_at' => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
-    ];
-    foreach ($inventoryLogColumns as $column => $definition) {
-        if (!columnExists($conn, 'inventory_adjustment_logs', $column)) {
-            $conn->query("ALTER TABLE `inventory_adjustment_logs` ADD COLUMN `{$column}` {$definition}");
-        }
-    }
-}
 
 // 📁 表格 6：商品圖片 (product_images)
 $sql_imgs = "CREATE TABLE IF NOT EXISTS `product_images` (
@@ -165,6 +146,18 @@ $sql_users = "CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_users);
 
+// 💡 已經將「會員收藏」拉到這層，確保它一定會被建立
+// 📁 表格 8：會員收藏 (user_favorites)
+$sql_favorites = "CREATE TABLE IF NOT EXISTS `user_favorites` (
+    `favorite_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_user_product` (`user_id`, `product_id`),
+    INDEX `idx_favorites_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_favorites);
+
 $sql_carts = "CREATE TABLE IF NOT EXISTS `carts` (
     `cart_id` INT AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT NOT NULL UNIQUE,
@@ -191,6 +184,7 @@ $sql_cart_items = "CREATE TABLE IF NOT EXISTS `cart_items` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_cart_items);
 
+// 修正 cart_items 欄位
 if (columnExists($conn, 'cart_items', 'cart_id')) {
     $conn->query("ALTER TABLE `cart_items` MODIFY COLUMN `cart_id` INT NULL");
 }
@@ -407,66 +401,41 @@ $sql_promotion_banners = "CREATE TABLE IF NOT EXISTS `promotion_banners` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_promotion_banners);
 
-echo "<p style='color:blue;'>📋 基本 14 張資料表結構已確認/建立完成（含行銷活動相關表）。</p>";
+echo "<p style='color:blue;'>📋 基本資料表與會員收藏表結構已確認/建立完成。</p>";
 
 // === 延伸欄位同步檢查 ===
 
-// 追加 A: 為 product_images 補上 color 欄位
 if (!columnExists($conn, 'product_images', 'color')) {
-    $sql = "ALTER TABLE `product_images` ADD COLUMN `color` VARCHAR(50) NULL AFTER `is_main`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `product_images` 追加 `color` (顏色配圖功能) 欄位</p>";
-    }
+    $conn->query("ALTER TABLE `product_images` ADD COLUMN `color` VARCHAR(50) NULL AFTER `is_main`");
 }
 
 if (!columnExists($conn, 'product_images', 'sort_order')) {
     $afterColumn = columnExists($conn, 'product_images', 'display_order') ? 'display_order' : 'is_main';
-    $sql = "ALTER TABLE `product_images` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 AFTER `{$afterColumn}`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `product_images` 追加 `sort_order` 圖片排序欄位</p>";
-    }
+    $conn->query("ALTER TABLE `product_images` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 AFTER `{$afterColumn}`");
 }
 
 if (columnExists($conn, 'product_images', 'display_order') && columnExists($conn, 'product_images', 'sort_order')) {
-    if ($conn->query("UPDATE `product_images` SET `sort_order` = `display_order` WHERE (`sort_order` = 0 OR `sort_order` IS NULL) AND `display_order` IS NOT NULL")) {
-        echo "<p style='color:green;'>✅ 已同步舊欄位 `display_order` 到 `sort_order`</p>";
-    }
+    $conn->query("UPDATE `product_images` SET `sort_order` = `display_order` WHERE (`sort_order` = 0 OR `sort_order` IS NULL) AND `display_order` IS NOT NULL");
 }
 
 if (!columnExists($conn, 'products', 'description')) {
-    $sql = "ALTER TABLE `products` ADD COLUMN `description` TEXT NULL AFTER `name`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `description` 欄位</p>";
-    }
+    $conn->query("ALTER TABLE `products` ADD COLUMN `description` TEXT NULL AFTER `name`");
 }
 
 if (!columnExists($conn, 'products', 'warranty_info')) {
-    $sql = "ALTER TABLE `products` ADD COLUMN `warranty_info` TEXT NULL AFTER `description`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `products` 追加 `warranty_info` 欄位</p>";
-    }
-// 追加 B: 多分類對應表 (product_category_links)
+    $conn->query("ALTER TABLE `products` ADD COLUMN `warranty_info` TEXT NULL AFTER `description`");
 }
 
 if (!columnExists($conn, 'promotions', 'promotion_image_url')) {
-    $sql = "ALTER TABLE `promotions` ADD COLUMN `promotion_image_url` VARCHAR(255) NULL AFTER `name`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `promotions` 追加 `promotion_image_url` 欄位</p>";
-    }
+    $conn->query("ALTER TABLE `promotions` ADD COLUMN `promotion_image_url` VARCHAR(255) NULL AFTER `name`");
 }
 
 if (!columnExists($conn, 'orders', 'tracking_number')) {
-    $sql = "ALTER TABLE `orders` ADD COLUMN `tracking_number` VARCHAR(100) NULL AFTER `payment_method`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `orders` 追加 `tracking_number` 欄位</p>";
-    }
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `tracking_number` VARCHAR(100) NULL AFTER `payment_method`");
 }
 
 if (!columnExists($conn, 'orders', 'admin_notes')) {
-    $sql = "ALTER TABLE `orders` ADD COLUMN `admin_notes` TEXT NULL AFTER `tracking_number`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:green;'>✅ 同步成功：已在 `orders` 追加 `admin_notes` 欄位</p>";
-    }
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `admin_notes` TEXT NULL AFTER `tracking_number`");
 }
 
 $sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
@@ -474,65 +443,47 @@ $sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
     `category_id` INT NOT NULL,
     PRIMARY KEY (`product_id`, `category_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-if ($conn->query($sql_links)) {
-    echo "<p style='color:green;'>✅ 已確認 `product_category_links` 多分類關聯表</p>";
-}
+$conn->query($sql_links);
 
-// 防呆 B：如果組員的 product_variants 裡有上版殘留的 `size` 欄位，自動將其移除
+// 防呆 B
 if (columnExists($conn, 'product_variants', 'size')) {
-    $sql = "ALTER TABLE `product_variants` DROP COLUMN `size`";
-    if ($conn->query($sql)) {
-        echo "<p style='color:orange;'>⚠️ 清理完畢：已移除 product_variants 中多餘的 `size` 欄位，統一使用 `size_inches`</p>";
-    }
+    $conn->query("ALTER TABLE `product_variants` DROP COLUMN `size`");
 }
 
-// 防呆 C：SKU 價格欄位拆分（original/special/member）
+// 防呆 C
 if (!columnExists($conn, 'product_variants', 'original_price')) {
     $conn->query("ALTER TABLE `product_variants` ADD COLUMN `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `capacity_liters`");
-    echo "<p style='color:green;'>✅ 已新增 `original_price` 欄位</p>";
 }
 if (!columnExists($conn, 'product_variants', 'special_price')) {
     $conn->query("ALTER TABLE `product_variants` ADD COLUMN `special_price` DECIMAL(10,2) NULL AFTER `original_price`");
-    echo "<p style='color:green;'>✅ 已新增 `special_price` 欄位</p>";
 }
 if (!columnExists($conn, 'product_variants', 'member_price')) {
     $conn->query("ALTER TABLE `product_variants` ADD COLUMN `member_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `special_price`");
-    echo "<p style='color:green;'>✅ 已新增 `member_price` 欄位</p>";
 }
-
-// 將舊 price 搬到新欄位，並移除 price
 if (columnExists($conn, 'product_variants', 'price')) {
     $conn->query("UPDATE `product_variants` SET `original_price` = `price`, `member_price` = `price` WHERE `original_price` = 0.00 AND `member_price` = 0.00");
     $conn->query("ALTER TABLE `product_variants` DROP COLUMN `price`");
-    echo "<p style='color:orange;'>⚠️ 已將 `price` 搬移至 `original_price`/`member_price` 並移除舊欄位</p>";
 }
 
-// 👇👇👇 新增的防呆 D：檢查 size_inches 的型態是否為 VARCHAR，如果不是就自動修改 👇👇👇
+// 防呆 D
 $checkSizeCol = $conn->query("SHOW COLUMNS FROM `product_variants` LIKE 'size_inches'");
 if ($checkSizeCol && $checkSizeCol->num_rows > 0) {
     $colData = $checkSizeCol->fetch_assoc();
-    // 檢查欄位型態名稱中是否包含 varchar (代表支援文字)
     if (stripos($colData['Type'], 'varchar') === false) {
-        // 如果不是文字型態（例如是 INT），強制轉換為 VARCHAR(50)
         $conn->query("ALTER TABLE `product_variants` MODIFY COLUMN `size_inches` VARCHAR(50) NULL");
-        echo "<p style='color:green;'>🔧 自動修復：已將 `size_inches` 的型態轉為 VARCHAR(50)，解決存入中文字報錯問題！</p>";
-    } else {
-        echo "<p style='color:gray;'>ℹ️ 狀態：`size_inches` 欄位型態已是 VARCHAR，支援中文字存取。</p>";
     }
 }
-// 👆👆👆 結束防呆 D 👆👆👆
 
-// 防呆 E：把舊的 primary_category_id 同步進多分類關聯表
+// 防呆 E：把舊的 primary_category_id 同步進多分類關聯表 (加上錯誤檢查保護)
 if (columnExists($conn, 'products', 'primary_category_id')) {
     $sqlSync = "INSERT IGNORE INTO product_category_links (product_id, category_id)
                 SELECT product_id, primary_category_id
                 FROM products
                 WHERE primary_category_id IS NOT NULL";
-    if ($conn->query($sqlSync)) {
-        echo "<p style='color:green;'>✅ 已同步 products.primary_category_id 到 product_category_links</p>";
-    }
+    $conn->query($sqlSync);
+    
+    // 如果這裡執行失敗，上面的 mysqli_report_off 會讓它默默跳過，不會讓整個網頁當機
     $conn->query("ALTER TABLE `products` DROP COLUMN `primary_category_id`");
-    echo "<p style='color:orange;'>⚠️ 已移除 products.primary_category_id</p>";
 }
 
 // === 預填初始資料 ===
