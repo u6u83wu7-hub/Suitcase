@@ -5,6 +5,9 @@ $activeNav = '';
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -79,6 +82,10 @@ $notice = '';
 $noticeType = 'success';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!apValidateCsrf()) {
+        $notice = '表單驗證失敗，請重新操作。';
+        $noticeType = 'error';
+    } else {
     $fullAddress = isset($_POST['full_address']) ? trim($_POST['full_address']) : '';
     $addressNote = isset($_POST['address_note']) ? trim($_POST['address_note']) : '';
     $cardholderName = isset($_POST['cardholder_name']) ? trim($_POST['cardholder_name']) : '';
@@ -113,6 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $notice = '無法建立資料更新語句。';
             $noticeType = 'error';
         }
+    }
     }
 }
 

@@ -1,8 +1,15 @@
 <?php
 session_start();
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
+
 $error_message = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    if (!apValidateCsrf()) {
+        $error_message = "表單驗證失敗，請重新送出。";
+    } else {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     if ($conn->connect_error) die("資料庫連線失敗: " . $conn->connect_error);
     $conn->set_charset("utf8mb4");
@@ -45,6 +52,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt->close();
     }
     $conn->close();
+    }
 }
 ?>
 
@@ -127,6 +135,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             <?php endif; ?>
 
             <form action="login.php" method="POST">
+                <?php echo apCsrfField(); ?>
                 <div class="form-group">
                     <label for="email">電子郵件 / 帳號</label>
                     <input type="email" id="email" name="email" placeholder="輸入你的電子郵件或帳號" required>

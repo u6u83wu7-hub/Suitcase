@@ -1,0 +1,30 @@
+# Local environment
+.env
+.env.*
+!.env.example
+
+# XAMPP / local runtime artifacts
+*.log
+backend/logs/
+tmp/
+temp/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Dependency and build artifacts, if introduced later
+vendor/
+node_modules/
+dist/
+build/
+
+# User-uploaded runtime images
+img/products/
+img/promotions/
+
+# Local-only project notes
+AGENTS.md

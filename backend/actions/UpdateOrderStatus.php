@@ -48,7 +48,43 @@ function buildTrackingNumber($carrier, $number) {
     return $number;
 }
 
+function ouAllowedNextStatuses($currentStatus) {
+    $map = [
+        'PENDING' => ['PROCESSING', 'CANCELLED'],
+        'PROCESSING' => ['SHIPPED', 'CANCELLED'],
+        'SHIPPED' => ['DELIVERED'],
+        'DELIVERED' => ['COMPLETED'],
+        'COMPLETED' => [],
+        'CANCELLED' => ['PROCESSING'],
+    ];
+
+    return $map[$currentStatus] ?? [];
+}
+
+function ouCanMoveStatus($currentStatus, $newStatus) {
+    if ($currentStatus === $newStatus) {
+        return true;
+    }
+
+    return in_array($newStatus, ouAllowedNextStatuses($currentStatus), true);
+}
+
+function ouStatusLabel($status) {
+    $labels = [
+        'PENDING' => '待處理',
+        'PROCESSING' => '處理中',
+        'SHIPPED' => '已出貨',
+        'DELIVERED' => '已送達',
+        'COMPLETED' => '已完成',
+        'CANCELLED' => '已取消',
+    ];
+
+    return $labels[$status] ?? $status;
+}
+
 $trackingNumber = buildTrackingNumber($shippingCarrier, $trackingNumberInput);
+$orderColumnsForInventory = tableColumns($conn, 'orders');
+$hasInventoryDeductedColumn = in_array('inventory_deducted', $orderColumnsForInventory, true);
 
 function ouTableExists($conn, $tableName) {
     $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -89,12 +125,14 @@ function ouNotifyShipping($conn, $orderId) {
 $conn->begin_transaction();
 
 try {
-    $orderSelect = $conn->prepare("SELECT status FROM orders WHERE order_id = ? FOR UPDATE");
+    $inventorySelect = $hasInventoryDeductedColumn ? ', inventory_deducted' : '';
+    $orderSelect = $conn->prepare("SELECT status{$inventorySelect} FROM orders WHERE order_id = ? FOR UPDATE");
     $itemsSelect = $conn->prepare("SELECT variant_id, quantity FROM order_items WHERE order_id = ?");
     $restockStmt = $conn->prepare("UPDATE product_variants SET stock_available = stock_available + ? WHERE variant_id = ?");
     $deductStmt = $conn->prepare("UPDATE product_variants SET stock_available = stock_available - ? WHERE variant_id = ? AND stock_available >= ?");
     $updateStatusStmt = $conn->prepare("UPDATE orders SET status = ? WHERE order_id = ?");
     $updateDetailStmt = $conn->prepare("UPDATE orders SET status = ?, tracking_number = ?, admin_notes = ? WHERE order_id = ?");
+    $markInventoryStmt = $hasInventoryDeductedColumn ? $conn->prepare("UPDATE orders SET inventory_deducted = ? WHERE order_id = ?") : null;
 
     foreach ($orderIds as $orderId) {
         $orderSelect->bind_param("i", $orderId);
@@ -106,9 +144,16 @@ try {
         }
 
         $currentStatus = $current['status'];
+        $inventoryDeducted = $hasInventoryDeductedColumn ? ((int)$current['inventory_deducted'] === 1) : true;
+
+        if (!ouCanMoveStatus($currentStatus, $newStatus)) {
+            throw new Exception(
+                '訂單 #' . $orderId . ' 無法從「' . ouStatusLabel($currentStatus) . '」改為「' . ouStatusLabel($newStatus) . '」。請依照訂單流程操作。'
+            );
+        }
 
         if ($currentStatus !== $newStatus) {
-            if ($newStatus === 'CANCELLED' && $currentStatus !== 'CANCELLED') {
+            if ($newStatus === 'CANCELLED' && $currentStatus !== 'CANCELLED' && (!$hasInventoryDeductedColumn || $inventoryDeducted)) {
                 $itemsSelect->bind_param("i", $orderId);
                 $itemsSelect->execute();
                 $itemsResult = $itemsSelect->get_result();
@@ -125,9 +170,14 @@ try {
                         throw new Exception('Restock failed for variant #' . $variantId);
                     }
                 }
+                if ($markInventoryStmt) {
+                    $deductedFlag = 0;
+                    $markInventoryStmt->bind_param("ii", $deductedFlag, $orderId);
+                    $markInventoryStmt->execute();
+                }
             }
 
-            if ($currentStatus === 'CANCELLED' && $newStatus !== 'CANCELLED') {
+            if ($currentStatus === 'CANCELLED' && $newStatus !== 'CANCELLED' && (!$hasInventoryDeductedColumn || !$inventoryDeducted)) {
                 $itemsSelect->bind_param("i", $orderId);
                 $itemsSelect->execute();
                 $itemsResult = $itemsSelect->get_result();
@@ -143,6 +193,11 @@ try {
                     if ($deductStmt->affected_rows !== 1) {
                         throw new Exception('Stock is not enough to restore order #' . $orderId);
                     }
+                }
+                if ($markInventoryStmt) {
+                    $deductedFlag = 1;
+                    $markInventoryStmt->bind_param("ii", $deductedFlag, $orderId);
+                    $markInventoryStmt->execute();
                 }
             }
         }

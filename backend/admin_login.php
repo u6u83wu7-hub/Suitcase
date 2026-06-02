@@ -1,5 +1,8 @@
 <?php
 session_start();
+require_once __DIR__ . '/../homepage/includes/security.php';
+
+apConfigureErrorHandling();
 
 // 如果已經登入過了，直接跳轉到後台主頁
 if (isset($_SESSION['admin_id'])) {
@@ -10,6 +13,9 @@ if (isset($_SESSION['admin_id'])) {
 $error = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    if (!apValidateCsrf()) {
+        $error = "❌ 表單驗證失敗，請重新送出。";
+    } else {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     if ($conn->connect_error) {
         die("資料庫連線失敗: " . $conn->connect_error);
@@ -57,6 +63,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt->close();
     }
     $conn->close();
+    }
 }
 ?>
 
@@ -88,6 +95,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <?php endif; ?>
 
         <form action="admin_login.php" method="POST">
+            <?php echo apCsrfField(); ?>
             <div class="form-group">
                 <label>管理員帳號</label>
                 <input type="text" name="username" placeholder="請輸入帳號" required>

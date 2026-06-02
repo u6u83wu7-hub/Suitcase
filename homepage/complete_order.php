@@ -2,6 +2,9 @@
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -9,7 +12,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $orderId = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
-if ($orderId <= 0) {
+if ($orderId <= 0 || !apValidateCsrf()) {
     header('Location: profile.php#order-history');
     exit;
 }

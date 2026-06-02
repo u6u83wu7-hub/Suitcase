@@ -8,6 +8,9 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -41,6 +44,7 @@ function cartFetchRows($conn, $sql) {
 
 if (cartTableExists($conn, 'cart_items')) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_item_id'])) {
+        apRequireCsrf('cart.php');
         $deleteId = intval($_POST['delete_item_id']);
         $stmt = $conn->prepare('DELETE FROM cart_items WHERE cart_item_id = ? AND user_id = ?');
         if ($stmt) {
@@ -53,6 +57,7 @@ if (cartTableExists($conn, 'cart_items')) {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update_cart') {
+        apRequireCsrf('cart.php');
         $quantities = isset($_POST['quantities']) && is_array($_POST['quantities']) ? $_POST['quantities'] : [];
         $stmt = $conn->prepare('UPDATE cart_items SET quantity = ? WHERE cart_item_id = ? AND user_id = ?');
         $deleteStmt = $conn->prepare('DELETE FROM cart_items WHERE cart_item_id = ? AND user_id = ?');
@@ -95,6 +100,7 @@ if (cartTableExists($conn, 'cart_items')) {
             COALESCE(v.color, '') AS variant_color,
             COALESCE(v.size_inches, '') AS variant_size,
             COALESCE(v.sku_code, '') AS sku_code,
+            COALESCE(v.stock_available, 0) AS variant_stock,
             COALESCE(v.original_price, 0) AS original_price,
             COALESCE(v.special_price, NULL) AS special_price,
             COALESCE(v.member_price, 0) AS member_price,
@@ -144,6 +150,8 @@ foreach ($items as &$item) {
         $price = floatval($item['fallback_price']);
     }
     $item['display_price'] = $price;
+    $item['variant_stock'] = isset($item['variant_stock']) ? intval($item['variant_stock']) : 0;
+    $item['stock_warning'] = intval($item['quantity']) > $item['variant_stock'];
 }
 unset($item);
 include 'header.php';
@@ -213,12 +221,13 @@ include 'header.php';
                                             <div>規格：<?php echo htmlspecialchars($variantLabel); ?></div>
                                         <?php endif; ?>
                                         <div>SKU：<?php echo htmlspecialchars($item['sku_code'] !== '' ? $item['sku_code'] : '-'); ?></div>
+                                        <div style="<?php echo $item['stock_warning'] ? 'color:#b91c1c;font-weight:700;' : ''; ?>">庫存：<?php echo intval($item['variant_stock']); ?><?php echo $item['stock_warning'] ? '，請調整數量' : ''; ?></div>
                                         <div>加入時間：<?php echo htmlspecialchars($item['created_at']); ?></div>
                                     </div>
                                 </td>
                                 <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format($displayPrice); ?></td>
                                 <td style="padding:14px 12px;">
-                                    <input type="number" name="quantities[<?php echo intval($item['cart_item_id']); ?>]" value="<?php echo intval($item['quantity']); ?>" min="1" style="width:100px; height:40px; border:1px solid #ddd; border-radius:8px; padding:0 10px;" data-cart-qty data-unit-price="<?php echo htmlspecialchars((string)$displayPrice); ?>">
+                                    <input type="number" name="quantities[<?php echo intval($item['cart_item_id']); ?>]" value="<?php echo intval($item['quantity']); ?>" min="1" max="<?php echo max(1, intval($item['variant_stock'])); ?>" style="width:100px; height:40px; border:1px solid #ddd; border-radius:8px; padding:0 10px;" data-cart-qty data-unit-price="<?php echo htmlspecialchars((string)$displayPrice); ?>">
                                 </td>
                                 <td style="padding:14px 12px; font-weight:700;">NT$ <span data-cart-subtotal><?php echo number_format($subtotal); ?></span></td>
                                 <td style="padding:14px 12px;">

@@ -59,6 +59,18 @@ function odFetchRows($conn, $sql) {
     return $rows;
 }
 
+function odTableColumns($conn, $tableName) {
+    $columns = [];
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW COLUMNS FROM `{$safe}`");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $columns[] = $row['Field'];
+        }
+    }
+    return $columns;
+}
+
 $order = null;
 $orderItems = [];
 
@@ -70,6 +82,12 @@ if (odTableExists($conn, 'orders')) {
 if ($order && odTableExists($conn, 'order_items')) {
     $orderItems = odFetchRows($conn, "SELECT * FROM order_items WHERE order_id = " . intval($order['order_id']) . " ORDER BY order_item_id ASC");
 }
+
+$orderItemColumns = $orderItems ? odTableColumns($conn, 'order_items') : [];
+$hasUnitPrice = in_array('unit_price', $orderItemColumns, true);
+$hasSubtotalAmount = in_array('subtotal_amount', $orderItemColumns, true);
+$hasLockedPrice = in_array('locked_price', $orderItemColumns, true);
+$hasVariantName = in_array('variant_name', $orderItemColumns, true);
 
 include 'header.php';
 ?>
@@ -129,12 +147,36 @@ include 'header.php';
                 </thead>
                 <tbody>
                     <?php foreach ($orderItems as $item): ?>
+                        <?php
+                        $displayUnitPrice = 0.0;
+                        if ($hasUnitPrice && isset($item['unit_price']) && $item['unit_price'] !== null && $item['unit_price'] !== '') {
+                            $displayUnitPrice = (float)$item['unit_price'];
+                        } elseif ($hasLockedPrice && isset($item['locked_price']) && $item['locked_price'] !== null && $item['locked_price'] !== '') {
+                            $displayUnitPrice = (float)$item['locked_price'];
+                        }
+
+                        $displaySubtotal = 0.0;
+                        if ($hasSubtotalAmount && isset($item['subtotal_amount']) && $item['subtotal_amount'] !== null && $item['subtotal_amount'] !== '') {
+                            $displaySubtotal = (float)$item['subtotal_amount'];
+                        } else {
+                            $displaySubtotal = $displayUnitPrice * (int)$item['quantity'];
+                        }
+
+                        $variantText = '';
+                        if ($hasVariantName && isset($item['variant_name']) && trim((string)$item['variant_name']) !== '') {
+                            $variantText = trim((string)$item['variant_name']);
+                        } else {
+                            $sizeText = trim((string)($item['size_inches'] ?? ''));
+                            $colorText = trim((string)($item['color'] ?? ''));
+                            $variantText = trim($sizeText . ($sizeText !== '' && $colorText !== '' ? ' / ' : '') . $colorText);
+                        }
+                        ?>
                         <tr style="border-bottom:1px solid #f3f3f3;">
                             <td style="padding:14px 12px;"><?php echo htmlspecialchars($item['product_name']); ?></td>
-                            <td style="padding:14px 12px;"><?php echo htmlspecialchars($item['variant_name'] !== '' ? $item['variant_name'] : '-'); ?></td>
-                            <td style="padding:14px 12px;">NT$ <?php echo number_format(floatval($item['unit_price'])); ?></td>
+                            <td style="padding:14px 12px;"><?php echo htmlspecialchars($variantText !== '' ? $variantText : '-'); ?></td>
+                            <td style="padding:14px 12px;">NT$ <?php echo number_format($displayUnitPrice); ?></td>
                             <td style="padding:14px 12px;"><?php echo intval($item['quantity']); ?></td>
-                            <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['subtotal_amount'])); ?></td>
+                            <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format($displaySubtotal); ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>

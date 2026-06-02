@@ -174,6 +174,7 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `card_last4` VARCHAR(4) NULL,
     `card_expiry_month` VARCHAR(2) NULL,
     `card_expiry_year` VARCHAR(4) NULL,
+    `inventory_deducted` TINYINT(1) NOT NULL DEFAULT 0,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_orders_user_id` (`user_id`),
     INDEX `idx_orders_status` (`status`)
@@ -208,6 +209,9 @@ if (!columnExists($conn, 'orders', 'card_expiry_month')) {
 }
 if (!columnExists($conn, 'orders', 'card_expiry_year')) {
     $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_year` VARCHAR(4) NULL AFTER `card_expiry_month`");
+}
+if (!columnExists($conn, 'orders', 'inventory_deducted')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `inventory_deducted` TINYINT(1) NOT NULL DEFAULT 0 AFTER `card_expiry_year`");
 }
 
 $sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (

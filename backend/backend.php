@@ -1,11 +1,10 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
 date_default_timezone_set('Asia/Taipei');
 
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../homepage/includes/security.php';
+
+apConfigureErrorHandling();
 
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
@@ -96,6 +95,8 @@ if (!in_array($page, $allowed)) {
         </div>
     </main>
 </div>
+
+<?php echo apCsrfFormScript(); ?>
 
 <?php $conn->close(); ?>
 

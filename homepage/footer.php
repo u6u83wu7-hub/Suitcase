@@ -43,9 +43,12 @@
         }
     </style>
 
+    <?php require_once __DIR__ . '/includes/security.php'; echo apCsrfFormScript(); ?>
+
     <script>
         (function () {
             const isLoggedIn = <?php echo isset($_SESSION['user_id']) ? 'true' : 'false'; ?>;
+            const csrfToken = <?php echo json_encode(apCsrfToken(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
             const widget = document.getElementById('chatWidget');
             const toggleBtn = document.getElementById('chatToggle');
             const panel = document.getElementById('chatPanel');
@@ -88,7 +91,7 @@
             }
 
             function sendRequest(action, data) {
-                const body = new URLSearchParams(Object.assign({ action }, data));
+                const body = new URLSearchParams(Object.assign({ action, csrf_token: csrfToken }, data));
                 return fetch('chat_api.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

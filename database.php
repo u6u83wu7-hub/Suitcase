@@ -1,8 +1,15 @@
 <?php
-// 開啟錯誤回報與防護罩，強制 PHP 把所有隱藏的錯誤直接顯示在網頁上
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+// 本頁只供已登入管理員在本機檢視資料庫，請勿公開到正式環境。
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once __DIR__ . '/homepage/includes/security.php';
+
+apConfigureErrorHandling();
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: backend/admin_login.php');
+    exit;
+}
 mysqli_report(MYSQLI_REPORT_OFF); 
 
 date_default_timezone_set('Asia/Taipei');

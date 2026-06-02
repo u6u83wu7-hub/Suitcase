@@ -38,6 +38,9 @@ if (session_status() === PHP_SESSION_NONE) {
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
 require_once __DIR__ . '/includes/storefront_helpers.php';
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 $cartNotice = '';
 $cartNoticeType = 'success';
@@ -328,6 +331,10 @@ if ($defaultOriginalPrice !== null) {
 
 // 加入購物車：寫入 cart_items（存在則累加數量）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_to_cart') {
+    if (!apValidateCsrf()) {
+        $cartNotice = '表單驗證失敗，請重新操作。';
+        $cartNoticeType = 'error';
+    } else {
     if (!isset($_SESSION['user_id'])) {
         header('Location: login.php');
         exit;
@@ -342,8 +349,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $variantId = intval($variants[0]['variant_id']);
     }
 
+    $stockAvailable = null;
+    if ($variantId > 0) {
+        $stockStmt = $conn->prepare('SELECT stock_available FROM product_variants WHERE variant_id = ? AND product_id = ? LIMIT 1');
+        if ($stockStmt) {
+            $stockStmt->bind_param('ii', $variantId, $id);
+            $stockStmt->execute();
+            $stockRow = $stockStmt->get_result()->fetch_assoc();
+            $stockAvailable = $stockRow ? intval($stockRow['stock_available']) : 0;
+            $stockStmt->close();
+        }
+    }
+
     if (!tableExists($conn, 'cart_items')) {
         $cartNotice = '購物車資料表不存在，請先執行同步腳本。';
+        $cartNoticeType = 'error';
+    } elseif ($stockAvailable !== null && $quantity > $stockAvailable) {
+        $cartNotice = '加入數量超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
         $cartNoticeType = 'error';
     } else {
         $ok = false;
@@ -364,16 +386,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if ($hasExistingItem) {
                     $alreadyInCart = true;
                     $newQty = intval($existsQty) + $quantity;
-                    $upStmt = $conn->prepare('UPDATE cart_items SET quantity = ?, created_at = NOW() WHERE cart_item_id = ?');
-                    if ($upStmt) {
-                        $upStmt->bind_param('ii', $newQty, $existsId);
-                        $ok = $upStmt->execute();
-                        if (!$ok) {
-                            $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
-                        }
-                        $upStmt->close();
+                    if ($stockAvailable !== null && $newQty > $stockAvailable) {
+                        $cartErrorDetail = '購物車已有此商品，累計數量會超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
                     } else {
-                        $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
+                        $upStmt = $conn->prepare('UPDATE cart_items SET quantity = ?, created_at = NOW() WHERE cart_item_id = ?');
+                        if ($upStmt) {
+                            $upStmt->bind_param('ii', $newQty, $existsId);
+                            $ok = $upStmt->execute();
+                            if (!$ok) {
+                                $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
+                            }
+                            $upStmt->close();
+                        } else {
+                            $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
+                        }
                     }
                 } else {
                     $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)');
@@ -444,6 +470,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $cartNoticeType = 'error';
             pdLog('ADD_CART_FAIL user=' . $userId . ', product=' . $id . ', variant=' . $variantId . ', err=' . $conn->error);
         }
+    }
     }
 }
 

@@ -1,7 +1,4 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
 $pageTitle = '結帳 | All Pass';
 $activeNav = '';
 
@@ -11,6 +8,9 @@ if (session_status() === PHP_SESSION_NONE) {
 
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -94,6 +94,7 @@ $hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
 $hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
 $hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
 $hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumns, true);
+$hasInventoryDeductedColumn = in_array('inventory_deducted', $orderColumns, true);
 
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
@@ -143,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quantities']) && is_a
 
 $items = [];
 $totalAmount = 0;
+$stockWarnings = [];
 if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
     $idList = implode(',', array_map('intval', $selectedIds));
     $imageOrder = 'pi.is_main DESC, pi.sort_order ASC, pi.image_id ASC';
@@ -156,6 +158,7 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
             COALESCE(v.color, '') AS variant_color,
             COALESCE(v.size_inches, '') AS variant_size,
             COALESCE(v.sku_code, '') AS sku_code,
+            COALESCE(v.stock_available, 0) AS variant_stock,
             COALESCE(v.original_price, 0) AS original_price,
             COALESCE(v.special_price, NULL) AS special_price,
             COALESCE((
@@ -201,6 +204,10 @@ foreach ($items as &$item) {
     }
     $item['display_price'] = $displayPrice;
     $item['subtotal'] = $displayPrice * intval($item['quantity']);
+    $item['variant_stock'] = isset($item['variant_stock']) ? intval($item['variant_stock']) : 0;
+    if (intval($item['quantity']) > $item['variant_stock']) {
+        $stockWarnings[] = $item['product_name'] . ' 庫存不足，目前庫存 ' . $item['variant_stock'] . '，你選擇 ' . intval($item['quantity']) . '。';
+    }
     $totalAmount += $item['subtotal'];
 }
 unset($item);
@@ -231,8 +238,15 @@ $formExpiryYear = $_POST['expiry_year'] ?? $defaultCardExpiryYear;
 $formNote = $_POST['note'] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'place_order') {
+    if (!apValidateCsrf()) {
+        $errors[] = '表單驗證失敗，請重新操作。';
+    }
+
     if (empty($items)) {
         $errors[] = '請先選擇購物車中的商品。';
+    }
+    foreach ($stockWarnings as $warning) {
+        $errors[] = $warning;
     }
 
     $cardDigits = preg_replace('/\D+/', '', $formCardNumber);
@@ -298,6 +312,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $formShippingAddress,
             ];
             $orderTypes = 'sisdddsss';
+
+            if ($hasInventoryDeductedColumn) {
+                $orderColumnsList[] = 'inventory_deducted';
+                $orderValues[] = 1;
+                $orderTypes .= 'i';
+            }
 
             if ($hasShippingNotesColumn) {
                 $orderColumnsList[] = 'shipping_notes';
@@ -388,6 +408,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
 
             $itemSql = 'INSERT INTO order_items (' . implode(', ', $itemColumns) . ') VALUES (' . implode(', ', $itemPlaceholders) . ')';
+            $stockStmt = $conn->prepare('UPDATE product_variants SET stock_available = stock_available - ? WHERE variant_id = ? AND stock_available >= ?');
+            if (!$stockStmt) {
+                throw new RuntimeException('無法建立庫存扣減語句。');
+            }
 
             foreach ($items as $item) {
                 $quantity = intval($item['quantity']);
@@ -400,6 +424,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $lockedPrice = $unitPrice;
                 $productId = intval($item['product_id']);
                 $subtotalAmount = $lockedPrice * $quantity;
+
+                if ($variantId <= 0) {
+                    throw new RuntimeException('商品規格資料不完整，無法建立訂單。');
+                }
+
+                $stockStmt->bind_param('iii', $quantity, $variantId, $quantity);
+                $stockStmt->execute();
+                if ($stockStmt->affected_rows !== 1) {
+                    throw new RuntimeException('商品庫存不足，請返回購物車調整數量。');
+                }
 
                 $itemValues = [$orderId];
                 if ($hasOrderItemProductIdColumn) {
@@ -438,6 +472,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
                 $itemStmt->close();
             }
+            $stockStmt->close();
 
             $cartIds = array_map('intval', $selectedIds);
             if (!empty($cartIds)) {
@@ -508,6 +543,15 @@ include 'header.php';
         </div>
     <?php endif; ?>
 
+    <?php if (empty($errors) && !empty($stockWarnings)): ?>
+        <div style="margin-bottom:16px; padding:14px 16px; border-radius:12px; background:#fff7ed; color:#9a3412; border:1px solid #fdba74; line-height:1.7;">
+            <?php foreach ($stockWarnings as $warning): ?>
+                <div>• <?php echo htmlspecialchars($warning); ?></div>
+            <?php endforeach; ?>
+            <div style="margin-top:6px;">請返回購物車調整數量後再結帳。</div>
+        </div>
+    <?php endif; ?>
+
     <?php if (empty($items)): ?>
         <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:32px; text-align:center; color:#777;">
             你沒有選取任何購物車商品。
@@ -555,6 +599,7 @@ include 'header.php';
                                                 <div>規格：<?php echo htmlspecialchars($variantLabel); ?></div>
                                             <?php endif; ?>
                                             <div>SKU：<?php echo htmlspecialchars($item['sku_code'] !== '' ? $item['sku_code'] : '-'); ?></div>
+                                            <div style="<?php echo intval($item['quantity']) > intval($item['variant_stock']) ? 'color:#b91c1c;font-weight:700;' : ''; ?>">庫存：<?php echo intval($item['variant_stock']); ?></div>
                                         </div>
                                     </td>
                                     <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['display_price'])); ?></td>
@@ -648,7 +693,7 @@ include 'header.php';
                         </div>
                         <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
                             <a href="cart.php" style="display:inline-flex; align-items:center; justify-content:center; padding:12px 18px; border-radius:999px; background:#111; color:#fff; font-weight:700;">回購物車修改</a>
-                            <button type="submit" style="padding:12px 18px; border:none; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">確認結帳</button>
+                            <button type="submit" <?php echo !empty($stockWarnings) ? 'disabled' : ''; ?> style="padding:12px 18px; border:none; border-radius:999px; background:<?php echo !empty($stockWarnings) ? '#cbd5e1' : '#db6b6b'; ?>; color:#fff; font-weight:700; cursor:<?php echo !empty($stockWarnings) ? 'not-allowed' : 'pointer'; ?>;"><?php echo !empty($stockWarnings) ? '庫存不足，無法結帳' : '確認結帳'; ?></button>
                         </div>
                     </div>
                 </section>

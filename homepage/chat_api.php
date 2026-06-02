@@ -1,5 +1,8 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['user_id'])) {
@@ -9,6 +12,11 @@ if (!isset($_SESSION['user_id'])) {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['success' => false, 'error' => 'invalid_method']);
+    exit;
+}
+
+if (!apValidateCsrf()) {
+    echo json_encode(['success' => false, 'error' => 'invalid_csrf']);
     exit;
 }
 

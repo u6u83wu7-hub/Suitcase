@@ -3,6 +3,7 @@ require_once __DIR__ . '/../auth_guard.php';
 // products/edit_product.php - 編輯商品頁面（置於子資料夾內）
 
 $product_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
+$lowStockThreshold = isset($lowStockThreshold) ? (int)$lowStockThreshold : 5;
 if ($product_id <= 0) {
     echo "<script>alert('無效的商品 ID'); location.href='backend.php?page=products';</script>";
     exit;
@@ -50,6 +51,19 @@ if (empty($variants)) {
         'member_price' => 0,
         'stock_available' => 0
     ];
+}
+$skuCount = count($variants);
+$totalStock = 0;
+$outSkuCount = 0;
+$lowSkuCount = 0;
+foreach ($variants as $variantForStock) {
+    $stock = (int)($variantForStock['stock_available'] ?? 0);
+    $totalStock += $stock;
+    if ($stock === 0) {
+        $outSkuCount++;
+    } elseif ($stock <= $lowStockThreshold) {
+        $lowSkuCount++;
+    }
 }
 
 // 4. 取得舊圖片
@@ -111,8 +125,32 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                 <h3 class="pm-section-title" style="border:none; padding:0; margin:0;">SKU 規格與價格配置</h3>
                 <button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="addSkuBtn">+ 新增一組規格</button>
             </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:12px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; margin-bottom:14px;">
+                <span style="font-weight:700; color:#0f172a;">庫存摘要</span>
+                <span class="pm-badge" style="background:#e2e8f0; color:#334155;">SKU <?php echo $skuCount; ?></span>
+                <span class="pm-badge" style="background:#dcfce7; color:#166534;">總庫存 <?php echo number_format($totalStock); ?></span>
+                <?php if ($lowSkuCount > 0): ?>
+                    <span class="pm-badge" style="background:#fef3c7; color:#92400e;">低庫存 <?php echo $lowSkuCount; ?></span>
+                <?php endif; ?>
+                <?php if ($outSkuCount > 0): ?>
+                    <span class="pm-badge" style="background:#fee2e2; color:#991b1b;">售罄 SKU <?php echo $outSkuCount; ?></span>
+                <?php endif; ?>
+                <span style="color:#64748b; font-size:13px;">低庫存門檻：<?php echo $lowStockThreshold; ?> 件以下。</span>
+            </div>
             <div id="skuRows">
                 <?php foreach ($variants as $v): ?>
+                <?php
+                $variantStock = (int)($v['stock_available'] ?? 0);
+                $stockHint = '庫存正常';
+                $stockHintStyle = 'color:#166534;';
+                if ($variantStock === 0) {
+                    $stockHint = '售罄，前台不可購買此數量';
+                    $stockHintStyle = 'color:#991b1b;';
+                } elseif ($variantStock <= $lowStockThreshold) {
+                    $stockHint = '低庫存，建議補貨';
+                    $stockHintStyle = 'color:#92400e;';
+                }
+                ?>
                 <div class="pm-sku-row">
                     <input type="hidden" name="variant_id[]" value="<?= $v['variant_id'] ?>">
                     <div class="pm-grid">
@@ -139,6 +177,7 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                         <div class="pm-col-3">
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>
                             <input class="pm-input" type="number" name="stock[]" min="0" step="1" required value="<?= intval($v['stock_available']) ?>">
+                            <div class="sku-stock-hint" style="margin-top:6px; font-size:12px; font-weight:700; <?php echo $stockHintStyle; ?>"><?php echo htmlspecialchars($stockHint); ?></div>
                         </div>
                     </div>
                     <div style="text-align:right; margin-top:10px;">
@@ -252,5 +291,47 @@ document.addEventListener('DOMContentLoaded', function() {
             if(e.target.classList.contains('remove-sku')) setTimeout(updateExistingImageColors, 150);
         });
     }
+})();
+
+// 庫存提示即時更新，協助管理員判斷是否售罄或需要補貨。
+(function() {
+    const lowStockThreshold = <?php echo (int)$lowStockThreshold; ?>;
+
+    function ensureHint(input) {
+        let hint = input.parentElement.querySelector('.sku-stock-hint');
+        if (!hint) {
+            hint = document.createElement('div');
+            hint.className = 'sku-stock-hint';
+            hint.style.marginTop = '6px';
+            hint.style.fontSize = '12px';
+            hint.style.fontWeight = '700';
+            input.insertAdjacentElement('afterend', hint);
+        }
+        return hint;
+    }
+
+    function updateStockHint(input) {
+        const value = Number.parseInt(input.value || '0', 10);
+        const stock = Number.isNaN(value) || value < 0 ? 0 : value;
+        const hint = ensureHint(input);
+        if (stock === 0) {
+            hint.textContent = '售罄，前台不可購買此數量';
+            hint.style.color = '#991b1b';
+        } else if (stock <= lowStockThreshold) {
+            hint.textContent = '低庫存，建議補貨';
+            hint.style.color = '#92400e';
+        } else {
+            hint.textContent = '庫存正常';
+            hint.style.color = '#166534';
+        }
+    }
+
+    document.addEventListener('input', function(event) {
+        if (event.target.matches('input[name="stock[]"]')) {
+            updateStockHint(event.target);
+        }
+    });
+
+    document.querySelectorAll('input[name="stock[]"]').forEach(updateStockHint);
 })();
 </script>

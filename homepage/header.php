@@ -4,8 +4,11 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 date_default_timezone_set('Asia/Taipei');
+require_once __DIR__ . '/includes/security.php';
 require_once __DIR__ . '/includes/promotion_price_sync.php';
 require_once __DIR__ . '/includes/storefront_helpers.php';
+
+apConfigureErrorHandling();
 
 if (isset($conn)) {
     apRunPromotionSync($conn);

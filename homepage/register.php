@@ -1,48 +1,69 @@
 <?php
 session_start();
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
+
 $error_message = "";
 $success_message = "";
 
 // 當使用者按下註冊按鈕 (送出 POST 表單)
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    if (!apValidateCsrf()) {
+        $error_message = "表單驗證失敗，請重新送出。";
+    } else {
     // 建立資料庫連線
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     
     if ($conn->connect_error) {
         die("資料庫連線失敗: " . $conn->connect_error);
     }
+    $conn->set_charset("utf8mb4");
 
     // 取得使用者填寫的資料
-    $name = $_POST['name'];
-    $email = $_POST['email'];
-    $phone = $_POST['phone']; // 如果沒填會是空字串
+    $name = trim($_POST['name'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $phone = trim($_POST['phone'] ?? ''); // 如果沒填會是空字串
     $password = $_POST['password'];
     $confirm_password = $_POST['confirm_password'];
 
     // 1. 檢查兩次密碼是否輸入一致
     if ($password !== $confirm_password) {
         $error_message = "兩次輸入的密碼不一致，請重新確認！";
+    } elseif ($name === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 6) {
+        $error_message = "請確認姓名、電子信箱與密碼格式是否正確。";
     } else {
         // 2. 把密碼進行 Hash 加密 (超重要！保護客人隱私)
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
 
-        // 3. 準備 SQL 語法 (沒寫到的欄位，資料庫會自動填入預設值)
-        $sql = "INSERT INTO users (name, email, password_hash, phone) 
-                VALUES ('$name', '$email', '$hashed_password', '$phone')";
-
-        // 4. 執行 SQL 並檢查結果
-        if ($conn->query($sql) === TRUE) {
-            $success_message = "🎉 註冊成功！歡迎加入 All Pass，請前往登入。";
+        // 3. 使用 prepared statement，避免註冊資料造成 SQL injection。
+        $stmt = $conn->prepare("INSERT INTO users (name, email, password_hash, phone) VALUES (?, ?, ?, ?)");
+        if (!$stmt) {
+            $error_message = "系統發生錯誤，請稍後再試。";
         } else {
-            // 錯誤代碼 1062 代表違反 UNIQUE 約束 (信箱已經被註冊過了)
-            if ($conn->errno == 1062) {
-                $error_message = "這個電子信箱已經被註冊過囉！請直接登入或換一個信箱。";
-            } else {
-                $error_message = "系統發生錯誤: " . $conn->error;
+            $stmt->bind_param("ssss", $name, $email, $hashed_password, $phone);
+        }
+
+        // 4. 執行 SQL 並檢查結果。PHP 8 的 mysqli 預設會把 Duplicate entry 丟成例外。
+        if ($stmt) {
+            try {
+                $stmt->execute();
+                $success_message = "🎉 註冊成功！歡迎加入 All Pass，請前往登入。";
+            } catch (mysqli_sql_exception $e) {
+                if ((int) $e->getCode() === 1062) {
+                    $error_message = "這個電子信箱已經被註冊過囉！請直接登入或換一個信箱。";
+                } else {
+                    error_log('Register failed: ' . $e->getMessage());
+                    $error_message = "系統發生錯誤，請稍後再試。";
+                }
             }
+        }
+        if ($stmt) {
+            $stmt->close();
         }
     }
     $conn->close();
+    }
 }
 ?>
 
@@ -121,6 +142,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             <?php endif; ?>
 
             <form action="register.php" method="POST">
+                <?php echo apCsrfField(); ?>
                 <div class="form-row">
                     <div class="form-group">
                         <label for="name">真實姓名 <span style="color:red;">*</span></label>

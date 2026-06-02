@@ -3,8 +3,10 @@
 // 分發請求到各个 action 處理器
 //版本4
 require_once __DIR__ . '/auth_guard.php';
+require_once __DIR__ . '/../homepage/includes/security.php';
 
 date_default_timezone_set('Asia/Taipei');
+apConfigureErrorHandling();
 
 // 資料庫連線
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
@@ -20,6 +22,8 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     header("Location: backend.php?page=products");
     exit();
 }
+
+apRequireCsrf('backend.php?page=products');
 
 // 辅助函数
 function goProducts($message = '') {

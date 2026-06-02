@@ -27,6 +27,8 @@ $keyword = isset($_GET['keyword']) ? trim($_GET['keyword']) : '';
 $categoryFilter = isset($_GET['category_filter']) ? trim($_GET['category_filter']) : '';
 $statusFilter = isset($_GET['status_filter']) ? trim($_GET['status_filter']) : '';
 $featuredFilter = isset($_GET['featured_filter']) ? trim($_GET['featured_filter']) : '';
+$stockFilter = isset($_GET['stock_filter']) ? trim($_GET['stock_filter']) : '';
+$lowStockThreshold = 5;
 
 // 取得分類列表
 $categories = [];
@@ -57,6 +59,22 @@ if ($statusFilter !== '') {
 }
 if ($featuredFilter !== '') {
     $conditions[] = "p.is_featured = " . intval($featuredFilter);
+}
+if ($stockFilter === 'low') {
+    $conditions[] = "EXISTS (
+        SELECT 1
+        FROM product_variants pv_stock
+        WHERE pv_stock.product_id = p.product_id
+          AND pv_stock.stock_available > 0
+          AND pv_stock.stock_available <= {$lowStockThreshold}
+    )";
+} elseif ($stockFilter === 'out') {
+    $conditions[] = "NOT EXISTS (
+        SELECT 1
+        FROM product_variants pv_stock
+        WHERE pv_stock.product_id = p.product_id
+          AND pv_stock.stock_available > 0
+    )";
 }
 
 $whereClause = '';
@@ -103,8 +121,11 @@ $productSql = "
         p.name,
         p.status,
         p.is_featured,
-        COUNT(v.product_id) AS sku_count,
+        COUNT(v.variant_id) AS sku_count,
         COALESCE(SUM(v.stock_available), 0) AS total_stock,
+        COALESCE(SUM(CASE WHEN v.stock_available = 0 THEN 1 ELSE 0 END), 0) AS out_sku_count,
+        COALESCE(SUM(CASE WHEN v.stock_available > 0 AND v.stock_available <= {$lowStockThreshold} THEN 1 ELSE 0 END), 0) AS low_sku_count,
+        COALESCE(MIN(v.stock_available), 0) AS min_stock,
         MIN(COALESCE(v.special_price, v.original_price)) AS min_price,
         MAX(COALESCE(v.special_price, v.original_price)) AS max_price,
         GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS category_names,
@@ -134,6 +155,7 @@ function buildFilterQuery(array $overrides = []) {
         'category_filter' => isset($_GET['category_filter']) ? $_GET['category_filter'] : '',
         'status_filter' => isset($_GET['status_filter']) ? $_GET['status_filter'] : '',
         'featured_filter' => isset($_GET['featured_filter']) ? $_GET['featured_filter'] : '',
+        'stock_filter' => isset($_GET['stock_filter']) ? $_GET['stock_filter'] : '',
         'p' => isset($_GET['p']) ? $_GET['p'] : 1,
     ];
 

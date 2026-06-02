@@ -16,13 +16,13 @@ require_once __DIR__ . '/../auth_guard.php';
     <?php endif; ?>
 
     <!-- 篩選器 -->
-    <form method="GET" action="backend.php" class="pm-grid" style="margin-bottom: 16px; max-width: 850px;">
+    <form method="GET" action="backend.php" class="pm-grid" style="margin-bottom: 16px; max-width: 1000px;">
         <input type="hidden" name="page" value="products">
-        <div class="pm-col-3">
+        <div class="pm-col-2">
             <label>關鍵字搜尋</label>
             <input class="pm-input" name="keyword" value="<?php echo htmlspecialchars($keyword); ?>" placeholder="搜尋商品名稱...">
         </div>
-        <div class="pm-col-3">
+        <div class="pm-col-2">
             <label>商品分類</label>
             <select class="pm-select" name="category_filter">
                 <option value="">全部分類</option>
@@ -48,6 +48,14 @@ require_once __DIR__ . '/../auth_guard.php';
                 <option value="">全部</option>
                 <option value="1" <?php echo $featuredFilter === '1' ? 'selected' : ''; ?>>精選商品</option>
                 <option value="0" <?php echo $featuredFilter === '0' ? 'selected' : ''; ?>>一般商品</option>
+            </select>
+        </div>
+        <div class="pm-col-2">
+            <label>庫存狀態</label>
+            <select class="pm-select" name="stock_filter">
+                <option value="">全部</option>
+                <option value="low" <?php echo $stockFilter === 'low' ? 'selected' : ''; ?>>低庫存 SKU</option>
+                <option value="out" <?php echo $stockFilter === 'out' ? 'selected' : ''; ?>>售罄商品</option>
             </select>
         </div>
         <div class="pm-col-2" style="display:flex; gap:8px;">
@@ -125,9 +133,28 @@ require_once __DIR__ . '/../auth_guard.php';
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <span style="<?php echo (int)$row['total_stock'] === 0 ? 'color:#ef4444; font-weight:bold;' : ''; ?>">
+                                    <?php
+                                    $totalStock = (int)$row['total_stock'];
+                                    $lowSkuCount = (int)$row['low_sku_count'];
+                                    $outSkuCount = (int)$row['out_sku_count'];
+                                    $skuCount = (int)$row['sku_count'];
+                                    ?>
+                                    <span style="<?php echo $totalStock === 0 ? 'color:#ef4444; font-weight:bold;' : ''; ?>">
                                         <?php echo number_format((int)$row['total_stock']); ?>
                                     </span>
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;">
+                                        <?php if ($skuCount === 0): ?>
+                                            <span class="pm-badge pm-off">未建 SKU</span>
+                                        <?php elseif ($totalStock === 0): ?>
+                                            <span class="pm-badge pm-off">售罄</span>
+                                        <?php endif; ?>
+                                        <?php if ($lowSkuCount > 0): ?>
+                                            <span class="pm-badge" style="background:#fef3c7; color:#92400e;">低庫存 <?php echo $lowSkuCount; ?></span>
+                                        <?php endif; ?>
+                                        <?php if ($outSkuCount > 0 && $totalStock > 0): ?>
+                                            <span class="pm-badge" style="background:#fee2e2; color:#991b1b;">售罄 SKU <?php echo $outSkuCount; ?></span>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                                 <td>
                                     <span class="pm-badge <?php echo $row['status'] === 'ON SHELF' ? 'pm-on' : 'pm-off'; ?>">
