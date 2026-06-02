@@ -9,6 +9,12 @@ if ($product_id <= 0) {
     exit;
 }
 
+function epTableExists($conn, $tableName) {
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safeTable}'");
+    return $res && $res->num_rows > 0;
+}
+
 // 1. 取得基本資料
 $stmt = $conn->prepare("SELECT * FROM products WHERE product_id = ?");
 $stmt->bind_param("i", $product_id);
@@ -73,6 +79,27 @@ $iStmt->bind_param("i", $product_id);
 $iStmt->execute();
 $iRes = $iStmt->get_result();
 while ($i = $iRes->fetch_assoc()) $images[] = $i;
+
+$inventoryLogs = [];
+if (epTableExists($conn, 'inventory_adjustment_logs')) {
+    $logStmt = $conn->prepare("
+        SELECT l.*, au.username AS admin_username
+        FROM inventory_adjustment_logs l
+        LEFT JOIN admin_users au ON au.admin_id = l.admin_id
+        WHERE l.product_id = ?
+        ORDER BY l.created_at DESC, l.log_id DESC
+        LIMIT 12
+    ");
+    if ($logStmt) {
+        $logStmt->bind_param('i', $product_id);
+        $logStmt->execute();
+        $logRes = $logStmt->get_result();
+        while ($log = $logRes->fetch_assoc()) {
+            $inventoryLogs[] = $log;
+        }
+        $logStmt->close();
+    }
+}
 ?>
 
 <section class="pm-card" id="tab-edit">
@@ -223,6 +250,61 @@ while ($i = $iRes->fetch_assoc()) $images[] = $i;
                     <div id="image-preview-container" style="display:flex; gap:16px; flex-wrap:wrap; margin-top:16px;"></div>
                 </div>
             </div>
+        </div>
+
+        <div class="pm-section-box">
+            <h3 class="pm-section-title">近期庫存異動</h3>
+            <?php if (!epTableExists($conn, 'inventory_adjustment_logs')): ?>
+                <div style="padding:14px; border:1px solid #fde68a; background:#fffbeb; color:#92400e; border-radius:10px; line-height:1.7;">
+                    尚未建立庫存異動紀錄表。請先執行 <code>db_setup_and_sync.php</code> 後再測試此功能。
+                </div>
+            <?php elseif (empty($inventoryLogs)): ?>
+                <div style="padding:14px; border:1px solid #e2e8f0; background:#f8fafc; color:#64748b; border-radius:10px;">
+                    目前尚無庫存異動紀錄。
+                </div>
+            <?php else: ?>
+                <div class="pm-table-wrap">
+                    <table class="pm-table">
+                        <thead>
+                            <tr>
+                                <th>時間</th>
+                                <th>SKU</th>
+                                <th>規格</th>
+                                <th>異動</th>
+                                <th>操作</th>
+                                <th>管理員</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($inventoryLogs as $log): ?>
+                                <?php
+                                $delta = (int)$log['delta_quantity'];
+                                $deltaStyle = $delta < 0 ? 'color:#991b1b;' : ($delta > 0 ? 'color:#166534;' : 'color:#64748b;');
+                                $deltaText = ($delta > 0 ? '+' : '') . $delta;
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($log['created_at']); ?></td>
+                                    <td><?php echo htmlspecialchars($log['sku_code'] ?: '-'); ?></td>
+                                    <td><?php echo htmlspecialchars(trim(($log['size_inches'] ?: '-') . ' / ' . ($log['color'] ?: '-'))); ?></td>
+                                    <td>
+                                        <strong style="<?php echo $deltaStyle; ?>"><?php echo htmlspecialchars($deltaText); ?></strong>
+                                        <div style="font-size:12px; color:#64748b;">
+                                            <?php echo intval($log['old_stock']); ?> → <?php echo intval($log['new_stock']); ?>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="pm-badge" style="background:#e2e8f0; color:#334155;"><?php echo htmlspecialchars($log['action_type']); ?></span>
+                                        <?php if (!empty($log['note'])): ?>
+                                            <div style="font-size:12px; color:#64748b; margin-top:4px;"><?php echo htmlspecialchars($log['note']); ?></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo htmlspecialchars($log['admin_username'] ?: ('#' . (int)$log['admin_id'])); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div style="text-align: right; margin-top: 24px;">

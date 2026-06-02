@@ -26,6 +26,12 @@ function columnExists($conn, $table, $column) {
     return $result && $result->num_rows > 0;
 }
 
+function tableExists($conn, $table) {
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $table);
+    $result = $conn->query("SHOW TABLES LIKE '{$safeTable}'");
+    return $result && $result->num_rows > 0;
+}
+
 // 📁 表格 1：管理員 (admin_users)
 $sql_admin = "CREATE TABLE IF NOT EXISTS `admin_users` (
     `admin_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -88,6 +94,49 @@ $sql_vars = "CREATE TABLE IF NOT EXISTS `product_variants` (
     `stock_reserved` INT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_vars);
+
+// 📁 表格 5.1：庫存異動紀錄（新增設計）
+$sql_inventory_logs = "CREATE TABLE IF NOT EXISTS `inventory_adjustment_logs` (
+    `log_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `product_id` INT NOT NULL,
+    `variant_id` INT NULL,
+    `sku_code` VARCHAR(50) NULL,
+    `size_inches` VARCHAR(50) NULL,
+    `color` VARCHAR(50) NULL,
+    `old_stock` INT NOT NULL DEFAULT 0,
+    `new_stock` INT NOT NULL DEFAULT 0,
+    `delta_quantity` INT NOT NULL DEFAULT 0,
+    `action_type` VARCHAR(30) NOT NULL DEFAULT 'ADMIN_UPDATE',
+    `admin_id` INT NULL,
+    `note` VARCHAR(255) NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_inventory_logs_product_id` (`product_id`),
+    INDEX `idx_inventory_logs_variant_id` (`variant_id`),
+    INDEX `idx_inventory_logs_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_inventory_logs);
+
+if (tableExists($conn, 'inventory_adjustment_logs')) {
+    $inventoryLogColumns = [
+        'product_id' => 'INT NOT NULL DEFAULT 0',
+        'variant_id' => 'INT NULL',
+        'sku_code' => 'VARCHAR(50) NULL',
+        'size_inches' => 'VARCHAR(50) NULL',
+        'color' => 'VARCHAR(50) NULL',
+        'old_stock' => 'INT NOT NULL DEFAULT 0',
+        'new_stock' => 'INT NOT NULL DEFAULT 0',
+        'delta_quantity' => 'INT NOT NULL DEFAULT 0',
+        'action_type' => "VARCHAR(30) NOT NULL DEFAULT 'ADMIN_UPDATE'",
+        'admin_id' => 'INT NULL',
+        'note' => 'VARCHAR(255) NULL',
+        'created_at' => 'DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    ];
+    foreach ($inventoryLogColumns as $column => $definition) {
+        if (!columnExists($conn, 'inventory_adjustment_logs', $column)) {
+            $conn->query("ALTER TABLE `inventory_adjustment_logs` ADD COLUMN `{$column}` {$definition}");
+        }
+    }
+}
 
 // 📁 表格 6：商品圖片 (product_images)
 $sql_imgs = "CREATE TABLE IF NOT EXISTS `product_images` (

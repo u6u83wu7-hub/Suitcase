@@ -73,6 +73,117 @@
 .detail-copy { margin-top: 24px; color: #555; line-height: 1.8; }
 .detail-copy h2 { font-size: 15px; color: #222; margin-bottom: 8px; }
 .detail-info-box { margin-top: 20px; padding: 16px; border: 1px solid var(--line); background: #f9fafb; }
+.related-section {
+    margin-top: 44px;
+    padding-top: 30px;
+    border-top: 1px solid var(--line);
+}
+.related-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+.related-heading span {
+    display: block;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+.related-heading h2 {
+    margin: 0;
+    font-size: 22px;
+    color: var(--ink);
+}
+.related-heading a {
+    color: #475569;
+    font-size: 13px;
+    font-weight: 800;
+}
+.related-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.related-product-card {
+    display: grid;
+    grid-template-rows: 98px 1fr;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: inherit;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 8px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+.related-product-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 10px 24px rgba(32, 32, 32, 0.08);
+    transform: translateY(-1px);
+}
+.related-product-media {
+    width: 100%;
+    height: 98px;
+    max-height: 98px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8fafc;
+    border-bottom: 1px solid #eef2f7;
+    padding: 10px;
+}
+.related-section .related-product-image,
+.related-image-placeholder {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 112px;
+    max-height: 78px;
+    object-fit: contain !important;
+    background: transparent;
+    display: block;
+}
+.related-image-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #9ca3af;
+    font-size: 12px;
+}
+.related-product-body {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    padding: 12px;
+    min-height: 112px;
+}
+.related-product-card strong {
+    display: block;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.4;
+    min-height: 40px;
+    margin: 0;
+    overflow: hidden;
+}
+.related-product-card span {
+    display: block;
+    color: var(--accent);
+    font-weight: 800;
+    font-size: 15px;
+    margin: 0;
+}
+.related-product-card small {
+    width: fit-content;
+    color: #475569;
+    background: #f1f5f9;
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 800;
+}
 .detail-faq { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 24px; }
 .detail-section-heading span { display: block; color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: 1px; margin-bottom: 4px; }
 .detail-section-heading h2 { margin: 0 0 14px; font-size: 20px; color: var(--ink); }
@@ -93,6 +204,29 @@
 @media (max-width: 840px) {
     .detail-wrap { grid-template-columns: 1fr; gap: 28px; }
     .detail-page { padding-top: 190px; }
+    .related-section { margin-top: 32px; padding-top: 24px; }
+    .related-heading { align-items: flex-start; }
+    .related-grid {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        padding-bottom: 4px;
+    }
+    .related-product-card {
+        flex: 0 0 176px;
+        scroll-snap-align: start;
+    }
+    .related-product-media {
+        height: 88px;
+        max-height: 88px;
+    }
+    .related-section .related-product-image,
+    .related-image-placeholder {
+        height: 100%;
+        max-height: 68px;
+    }
+    .related-product-body { min-height: 108px; }
     .sticky-actions { display: flex; gap: 10px; position: sticky; bottom: 0; background: #fff; padding: 12px; border-top: 1px solid var(--line); }
     .sticky-actions .detail-btn { flex: 1; }
 }

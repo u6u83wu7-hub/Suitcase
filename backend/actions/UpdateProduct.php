@@ -16,6 +16,57 @@ if ($name === '') {
     goProducts('請輸入商品名稱');
 }
 
+function upTableExists($conn, $tableName) {
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safeTable}'");
+    return $res && $res->num_rows > 0;
+}
+
+function upLogInventoryChange($conn, $enabled, $productId, $variantId, array $snapshot, $oldStock, $newStock, $actionType, $adminId, $note) {
+    if (!$enabled) {
+        return;
+    }
+
+    if ($actionType === 'ADMIN_UPDATE' && (int)$oldStock === (int)$newStock) {
+        return;
+    }
+
+    $skuCode = isset($snapshot['sku_code']) ? (string)$snapshot['sku_code'] : '';
+    $size = isset($snapshot['size_inches']) ? (string)$snapshot['size_inches'] : '';
+    $color = isset($snapshot['color']) ? (string)$snapshot['color'] : '';
+    $oldStock = (int)$oldStock;
+    $newStock = (int)$newStock;
+    $delta = $newStock - $oldStock;
+    $variantIdValue = $variantId > 0 ? $variantId : null;
+    $adminIdValue = $adminId > 0 ? $adminId : null;
+
+    $stmt = $conn->prepare("
+        INSERT INTO inventory_adjustment_logs
+            (product_id, variant_id, sku_code, size_inches, color, old_stock, new_stock, delta_quantity, action_type, admin_id, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ");
+    if (!$stmt) {
+        return;
+    }
+
+    $stmt->bind_param(
+        'iisssiiisis',
+        $productId,
+        $variantIdValue,
+        $skuCode,
+        $size,
+        $color,
+        $oldStock,
+        $newStock,
+        $delta,
+        $actionType,
+        $adminIdValue,
+        $note
+    );
+    $stmt->execute();
+    $stmt->close();
+}
+
 // 分類（多選 + 動態新增）
 $categoryIds = isset($_POST['category_ids']) && is_array($_POST['category_ids'])
     ? array_values(array_unique(array_map('intval', $_POST['category_ids'])))
@@ -39,6 +90,16 @@ $warrantyInfo = isset($_POST['warranty_info']) ? trim($_POST['warranty_info']) :
 $conn->begin_transaction();
 
 try {
+    $inventoryLogEnabled = upTableExists($conn, 'inventory_adjustment_logs');
+    $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : 0;
+    $existingVariants = [];
+    $existingVariantRes = $conn->query("SELECT variant_id, sku_code, size_inches, color, stock_available FROM product_variants WHERE product_id = {$productId} FOR UPDATE");
+    if ($existingVariantRes) {
+        while ($existingVariant = $existingVariantRes->fetch_assoc()) {
+            $existingVariants[(int)$existingVariant['variant_id']] = $existingVariant;
+        }
+    }
+
     // 更新商品主檔
     $setCols = ['name = ?', 'is_featured = ?'];
     $bindTypes = 'si';
@@ -93,6 +154,8 @@ try {
         $color = isset($colors[$i]) ? trim($colors[$i]) : '';
 
         if ($variantId > 0) {
+            $oldVariant = $existingVariants[$variantId] ?? null;
+            $oldStock = $oldVariant ? (int)$oldVariant['stock_available'] : 0;
             $vSet = ['original_price = ?', 'special_price = ?', 'member_price = ?', 'stock_available = ?'];
             $vTypes = 'dddi';
             $vVals = [$originalPrice, $specialPrice, $memberPrice, $stock];
@@ -118,6 +181,12 @@ try {
             if (!$vStmt->execute()) {
                 throw new Exception('SKU 更新失敗');
             }
+            $logSnapshot = [
+                'sku_code' => $oldVariant['sku_code'] ?? '',
+                'size_inches' => $size,
+                'color' => $color,
+            ];
+            upLogInventoryChange($conn, $inventoryLogEnabled, $productId, $variantId, $logSnapshot, $oldStock, $stock, 'ADMIN_UPDATE', $adminId, '後台商品編輯更新庫存');
             $keepIds[] = $variantId;
         } else {
             $skuCode = 'AL-' . strtoupper(substr(md5($productId . '-' . $i . '-' . microtime(true)), 0, 10));
@@ -143,7 +212,14 @@ try {
             if (!$vStmt->execute()) {
                 throw new Exception('SKU 建立失敗');
             }
-            $keepIds[] = $conn->insert_id;
+            $newVariantId = (int)$conn->insert_id;
+            $logSnapshot = [
+                'sku_code' => $skuCode,
+                'size_inches' => $size,
+                'color' => $color,
+            ];
+            upLogInventoryChange($conn, $inventoryLogEnabled, $productId, $newVariantId, $logSnapshot, 0, $stock, 'SKU_CREATE', $adminId, '後台新增 SKU');
+            $keepIds[] = $newVariantId;
         }
     }
 
@@ -154,8 +230,38 @@ try {
     if (!empty($keepIds)) {
         $safeIds = array_map('intval', $keepIds);
         $idList = implode(',', $safeIds);
+        $deleteIds = array_diff(array_keys($existingVariants), $safeIds);
+        foreach ($deleteIds as $deleteVariantId) {
+            $deletedVariant = $existingVariants[(int)$deleteVariantId];
+            upLogInventoryChange(
+                $conn,
+                $inventoryLogEnabled,
+                $productId,
+                (int)$deleteVariantId,
+                $deletedVariant,
+                (int)$deletedVariant['stock_available'],
+                0,
+                'SKU_DELETE',
+                $adminId,
+                '後台移除 SKU'
+            );
+        }
         $conn->query("DELETE FROM product_variants WHERE product_id = {$productId} AND variant_id NOT IN ({$idList})");
     } else {
+        foreach ($existingVariants as $deleteVariantId => $deletedVariant) {
+            upLogInventoryChange(
+                $conn,
+                $inventoryLogEnabled,
+                $productId,
+                (int)$deleteVariantId,
+                $deletedVariant,
+                (int)$deletedVariant['stock_available'],
+                0,
+                'SKU_DELETE',
+                $adminId,
+                '後台移除全部 SKU'
+            );
+        }
         $conn->query("DELETE FROM product_variants WHERE product_id = {$productId}");
     }
 

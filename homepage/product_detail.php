@@ -486,6 +486,94 @@ if (tableExists($conn, 'categories') && tableExists($conn, 'product_category_lin
     }
 }
 
+$relatedProducts = [];
+if (tableExists($conn, 'product_category_links')) {
+    $categoryIds = array_map(function ($category) {
+        return (int)$category['category_id'];
+    }, $categories);
+
+    $relatedImageOrder = [];
+    if (in_array('is_main', $imageCols, true)) {
+        $relatedImageOrder[] = 'pi.is_main DESC';
+    }
+    if (in_array('sort_order', $imageCols, true)) {
+        $relatedImageOrder[] = 'pi.sort_order ASC';
+    }
+    if (empty($relatedImageOrder)) {
+        $relatedImageOrder[] = 'pi.image_id ASC';
+    }
+    $relatedImageOrderSql = implode(', ', $relatedImageOrder);
+
+    if (!empty($categoryIds)) {
+        $categoryList = implode(',', array_map('intval', $categoryIds));
+        $relatedSql = "
+            SELECT
+                p.product_id,
+                p.name,
+                p.is_featured,
+                COUNT(DISTINCT pcl_match.category_id) AS match_count,
+                COALESCE(SUM(v.stock_available), 0) AS total_stock,
+                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                (
+                    SELECT pi.image_url
+                    FROM product_images pi
+                    WHERE pi.product_id = p.product_id
+                    ORDER BY {$relatedImageOrderSql}
+                    LIMIT 1
+                ) AS image_url
+            FROM products p
+            INNER JOIN product_category_links pcl_match ON pcl_match.product_id = p.product_id
+            LEFT JOIN product_variants v ON v.product_id = p.product_id
+            WHERE p.product_id <> {$id}
+              AND p.status = 'ON SHELF'
+              AND pcl_match.category_id IN ({$categoryList})
+            GROUP BY p.product_id
+            HAVING total_stock > 0
+            ORDER BY match_count DESC, p.is_featured DESC, total_stock DESC, p.created_at DESC
+            LIMIT 4
+        ";
+        $relatedRes = safeQuery($conn, $relatedSql, 'relatedProductsByCategory');
+        if ($relatedRes) {
+            while ($row = $relatedRes->fetch_assoc()) {
+                $relatedProducts[] = $row;
+            }
+        }
+    }
+
+    if (empty($relatedProducts)) {
+        $fallbackSql = "
+            SELECT
+                p.product_id,
+                p.name,
+                p.is_featured,
+                0 AS match_count,
+                COALESCE(SUM(v.stock_available), 0) AS total_stock,
+                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                (
+                    SELECT pi.image_url
+                    FROM product_images pi
+                    WHERE pi.product_id = p.product_id
+                    ORDER BY {$relatedImageOrderSql}
+                    LIMIT 1
+                ) AS image_url
+            FROM products p
+            LEFT JOIN product_variants v ON v.product_id = p.product_id
+            WHERE p.product_id <> {$id}
+              AND p.status = 'ON SHELF'
+            GROUP BY p.product_id
+            HAVING total_stock > 0
+            ORDER BY p.is_featured DESC, p.created_at DESC
+            LIMIT 4
+        ";
+        $fallbackRes = safeQuery($conn, $fallbackSql, 'relatedProductsFallback');
+        if ($fallbackRes) {
+            while ($row = $fallbackRes->fetch_assoc()) {
+                $relatedProducts[] = $row;
+            }
+        }
+    }
+}
+
 $productFaqs = [];
 if (tableExists($conn, 'product_qa')) {
     $faqSql = "SELECT question, answer, qa_type, product_id
@@ -505,7 +593,8 @@ if (tableExists($conn, 'product_qa')) {
 include 'header.php';
 ?>
 
-<link rel="stylesheet" href="../css/product_detail.css">
+<?php $productDetailCssVersion = @filemtime(__DIR__ . '/../css/product_detail.css') ?: time(); ?>
+<link rel="stylesheet" href="../css/product_detail.css?v=<?php echo $productDetailCssVersion; ?>">
 <main class="detail-page">
     <a href="index.php" class="back-link">回首頁</a>
     <section class="detail-wrap">
@@ -693,6 +782,40 @@ include 'header.php';
             <?php endif; ?>
         </div>
     </section>
+
+    <?php if (!empty($relatedProducts)): ?>
+        <section class="related-section" aria-label="相似行李箱推薦">
+            <div class="related-heading">
+                <div>
+                    <span>RECOMMENDED</span>
+                    <h2>相似行李箱推薦</h2>
+                </div>
+                <a href="new_in.php<?php echo !empty($categories) ? '?category_id=' . intval($categories[0]['category_id']) : ''; ?>">查看更多</a>
+            </div>
+            <div class="related-grid">
+                <?php foreach ($relatedProducts as $related): ?>
+                    <?php
+                    $relatedImage = !empty($related['image_url']) ? '../' . ltrim($related['image_url'], '/') : '';
+                    $relatedPrice = $related['price'] !== null ? (float)$related['price'] : 0;
+                    ?>
+                    <a class="related-product-card" href="product_detail.php?id=<?php echo intval($related['product_id']); ?>">
+                        <div class="related-product-media">
+                            <?php if ($relatedImage !== ''): ?>
+                                <img class="related-product-image" src="<?php echo htmlspecialchars($relatedImage); ?>" alt="<?php echo htmlspecialchars($related['name']); ?>" loading="lazy">
+                            <?php else: ?>
+                                <div class="related-image-placeholder">No Img</div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="related-product-body">
+                            <small><?php echo ((int)$related['match_count'] > 0) ? '同分類推薦' : '你可能也喜歡'; ?></small>
+                            <strong><?php echo htmlspecialchars($related['name']); ?></strong>
+                            <span>NT$ <?php echo number_format($relatedPrice); ?></span>
+                        </div>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </section>
+    <?php endif; ?>
 </main>
 
 <div id="toast" class="toast"></div>
