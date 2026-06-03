@@ -1,4 +1,5 @@
 hi
+現在價格還是亂的我現在是直接讓優惠卷在訂單提交時去覆蓋原本訂出來的價格，之後改價格的部分應該沒太大影響
 我把products.php 跟 backend_action.php 拆成小塊了
 products.php 的 js拆去 js/products.js, css 拆去 css/products.css
 然後 products.php 的功能拆去 backend/products/create 跟 backend/products/list
