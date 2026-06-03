@@ -17,7 +17,7 @@ $admin_username = isset($_SESSION['admin_username']) ? $_SESSION['admin_username
 $page = isset($_GET['page']) ? $_GET['page'] : 'profile'; // 預設首頁為 dashboard
 
 $allowed = [
-    'dashboard', 'products', 'categories', 'orders', 'members', 'customer_service', 'marketing', 'system', 'profile', 'edit_product'
+    'dashboard', 'products', 'categories', 'orders', 'coupon', 'members', 'customer_service', 'marketing', 'system', 'profile', 'edit_product'
 ];
 if (!in_array($page, $allowed)) {
     $page = 'profile';
@@ -38,9 +38,9 @@ if (isset($_SESSION['admin_username'])) {
 // 💡 核心修正 1：網址列強力攔截（白名單機制）
 // 如果目前登入的不是超級管理員 (role_id != 1)，就限制他只能存取特定的客服相關頁面
 if ($admin_role_id !== 1) {
-    $cs_allowed_pages = ['customer_service', 'profile'];
+    $cs_allowed_pages = ['customer_service', 'profile', 'coupon'];
     
-    if (!in_array($page, $cs_allowed_pages)) {
+    if (!in_array($page, $cs_allowed_pages, true)) {
         $page = 'profile'; // 只要企圖硬闖不對應的頁面，通通強制踢回儀表板！
     }
 }
@@ -107,10 +107,11 @@ if ($admin_role_id !== 1) {
         .menu li:nth-child(2) a::before { content: '📦'; }
         .menu li:nth-child(3) a::before { content: '🏷️'; }
         .menu li:nth-child(4) a::before { content: '📜'; }
-        .menu li:nth-child(5) a::before { content: '👥'; }
-        .menu li:nth-child(6) a::before { content: '💬'; }
-        .menu li:nth-child(7) a::before { content: '🎯'; }
-        .menu li:nth-child(8) a::before { content: '⚙️'; }
+        .menu li:nth-child(5) a::before { content: '🎟️'; }
+        .menu li:nth-child(6) a::before { content: '👥'; }
+        .menu li:nth-child(7) a::before { content: '💬'; }
+        .menu li:nth-child(8) a::before { content: '🎯'; }
+        .menu li:nth-child(9) a::before { content: '⚙️'; }
         
         .main { flex: 1; padding: 32px; min-width: 0;}
         .card { background: var(--card-bg); padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.02); }
@@ -151,6 +152,10 @@ if ($admin_role_id !== 1) {
             <?php endif; ?>
             <?php if ($admin_role_id === 1): ?>
             <li><a href="backend.php?page=orders" class="<?php echo $page=='orders' ? 'active' : ''; ?>"><span class="text">訂單管理</span></a></li>
+            <?php endif; ?>
+
+            <?php if ($admin_role_id === 1): ?>
+            <li><a href="backend.php?page=coupon" class="<?php echo $page=='coupon' ? 'active' : ''; ?>"><span class="text">優惠卷管理</span></a></li>
             <?php endif; ?>
                 
             <li><a href="backend.php?page=members" class="<?php echo $page=='members' ? 'active' : ''; ?>"><span class="text">會員管理</span></a></li>

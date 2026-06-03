@@ -4,15 +4,7 @@
 require_once __DIR__ . '/auth_guard.php';
 
 $selectedOrderId = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
-$allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
-$statusLabels = [
-    'PENDING' => '待處理',
-    'PROCESSING' => '處理中',
-    'SHIPPED' => '已出貨',
-    'DELIVERED' => '已送達',
-    'COMPLETED' => '已完成',
-    'CANCELLED' => '已取消',
-];
+$allowedStatuses = ['PENDING', 'PAID', 'SHIPPING', 'COMPLETED', 'CANCELLED'];
 
 function h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
@@ -46,50 +38,6 @@ function splitTrackingNumber($trackingNumber) {
         return [trim($parts[0]), trim($parts[1])];
     }
     return ['', $trackingNumber];
-}
-
-function orderNextActions($status) {
-    $map = [
-        'PENDING' => [
-            ['status' => 'PROCESSING', 'label' => '開始處理'],
-            ['status' => 'CANCELLED', 'label' => '取消訂單'],
-        ],
-        'PROCESSING' => [
-            ['status' => 'SHIPPED', 'label' => '標記已出貨'],
-            ['status' => 'CANCELLED', 'label' => '取消訂單'],
-        ],
-        'SHIPPED' => [
-            ['status' => 'DELIVERED', 'label' => '標記已送達'],
-        ],
-        'DELIVERED' => [
-            ['status' => 'COMPLETED', 'label' => '完成訂單'],
-        ],
-        'CANCELLED' => [
-            ['status' => 'PROCESSING', 'label' => '恢復處理'],
-        ],
-    ];
-    return $map[$status] ?? [];
-}
-
-function orderAllowedStatusOptions($status) {
-    $options = [$status];
-    foreach (orderNextActions($status) as $action) {
-        $options[] = $action['status'];
-    }
-    return array_values(array_unique($options));
-}
-
-function orderStatusHelpText($status) {
-    $map = [
-        'PENDING' => '待處理訂單可開始處理或取消；取消會補回已扣庫存。',
-        'PROCESSING' => '處理中訂單可標記出貨或取消；取消會補回已扣庫存。',
-        'SHIPPED' => '已出貨訂單只能標記為已送達，避免物流中訂單被誤取消。',
-        'DELIVERED' => '已送達訂單可完成訂單，完成後視為流程終點。',
-        'COMPLETED' => '已完成訂單為流程終點，只能更新物流與內部備註。',
-        'CANCELLED' => '已取消訂單已補回庫存；恢復處理時會重新檢查並扣除庫存。',
-    ];
-
-    return $map[$status] ?? '請依照訂單流程更新狀態。';
 }
 
 $startDate = isset($_GET['start_date']) ? trim($_GET['start_date']) : '';
@@ -134,11 +82,13 @@ if (!empty($conditions)) {
 
 $orders = [];
 $orderSql = "
-    SELECT o.order_id, o.user_id, o.total_amount, o.status, o.created_at,
-           o.recipient_name, o.recipient_phone, u.email, u.name AS user_name,
+    SELECT o.order_id, o.user_id, o.coupon_id, o.discount_amount, o.total_amount, o.status, o.created_at,
+        o.recipient_name, o.recipient_phone, u.email, u.name AS user_name,
+        c.coupon_name, c.coupon_code,
            COUNT(oi.order_item_id) AS item_count
     FROM orders o
     LEFT JOIN users u ON u.user_id = o.user_id
+    LEFT JOIN coupons c ON c.coupon_id = o.coupon_id
     LEFT JOIN order_items oi ON oi.order_id = o.order_id
     {$whereClause}
     GROUP BY o.order_id
@@ -175,20 +125,12 @@ if ($orderResult) {
     .om-kv dt { color: #64748b; }
     .om-kv dd { margin: 0; font-weight: 600; color: #1f2937; }
     .pm-status-pending { background: #e2e8f0; color: #334155; }
-    .pm-status-processing { background: #dbeafe; color: #1d4ed8; }
-    .pm-status-shipped { background: #fef3c7; color: #92400e; }
-    .pm-status-delivered { background: #ede9fe; color: #6d28d9; }
+    .pm-status-paid { background: #dbeafe; color: #1d4ed8; }
+    .pm-status-shipping { background: #fef3c7; color: #92400e; }
     .pm-status-completed { background: #dcfce7; color: #166534; }
     .pm-status-cancelled { background: #fee2e2; color: #991b1b; }
     .om-empty { padding: 22px 0; text-align: center; color: #94a3b8; }
     .om-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-    .om-flow { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
-    .om-flow-step { padding: 8px 10px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 12px; font-weight: 700; }
-    .om-flow-step.is-current { background: #111827; color: #fff; }
-    .om-quick-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; margin: 16px 0; }
-    .om-quick-actions form { margin: 0; }
-    .om-status-note { margin: 10px 0 18px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; color: #334155; line-height: 1.7; font-size: 13px; }
-    .om-warning { margin-top: 8px; color: #92400e; font-size: 13px; line-height: 1.6; }
     @media (max-width: 980px) {
         .om-detail-grid { grid-template-columns: 1fr; }
     }
@@ -223,7 +165,7 @@ if ($orderResult) {
                     <select class="pm-select" id="status" name="status">
                         <option value="">全部狀態</option>
                         <?php foreach ($allowedStatuses as $status): ?>
-                            <option value="<?php echo h($status); ?>" <?php echo $status === $statusFilter ? 'selected' : ''; ?>><?php echo h($statusLabels[$status] ?? $status); ?></option>
+                            <option value="<?php echo h($status); ?>" <?php echo $status === $statusFilter ? 'selected' : ''; ?>><?php echo h($status); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -242,14 +184,12 @@ if ($orderResult) {
                     <input type="hidden" name="action" value="bulk_update_orders">
                     <select class="pm-select" name="status" style="max-width:200px;">
                         <option value="">批次操作</option>
-                        <option value="PROCESSING">批次改為處理中</option>
-                        <option value="SHIPPED">批次改為已出貨</option>
-                        <option value="DELIVERED">批次改為已送達</option>
-                        <option value="COMPLETED">批次改為已完成</option>
-                        <option value="CANCELLED">批次改為已取消</option>
+                        <option value="PAID">批次改為已付款</option>
+                        <option value="SHIPPING">批次出貨</option>
+                        <option value="COMPLETED">批次完成</option>
+                        <option value="CANCELLED">批次取消</option>
                     </select>
                     <button class="pm-btn pm-btn-sub pm-btn-sm" type="submit">套用</button>
-                    <div class="om-warning">批次操作會逐筆檢查狀態流程；不合理的跳轉會被系統擋下。</div>
                 </form>
             </div>
             <div class="om-meta">共 <?php echo count($orders); ?> 筆 (最多顯示 200 筆)</div>
@@ -275,15 +215,11 @@ if ($orderResult) {
                     <tbody>
                         <?php foreach ($orders as $order): ?>
                             <?php
-                            $statusClassMap = [
-                                'PENDING' => 'pm-status-pending',
-                                'PROCESSING' => 'pm-status-processing',
-                                'SHIPPED' => 'pm-status-shipped',
-                                'DELIVERED' => 'pm-status-delivered',
-                                'COMPLETED' => 'pm-status-completed',
-                                'CANCELLED' => 'pm-status-cancelled',
-                            ];
-                            $statusClass = $statusClassMap[$order['status']] ?? 'pm-status-pending';
+                            $statusClass = 'pm-status-pending';
+                            if ($order['status'] === 'PAID') { $statusClass = 'pm-status-paid'; }
+                            if ($order['status'] === 'SHIPPING') { $statusClass = 'pm-status-shipping'; }
+                            if ($order['status'] === 'COMPLETED') { $statusClass = 'pm-status-completed'; }
+                            if ($order['status'] === 'CANCELLED') { $statusClass = 'pm-status-cancelled'; }
                             ?>
                             <tr>
                                 <td>
@@ -296,7 +232,7 @@ if ($orderResult) {
                                 </td>
                                 <td>NT$ <?php echo number_format((float)$order['total_amount']); ?></td>
                                 <td><?php echo intval($order['item_count']); ?> 件</td>
-                                <td><span class="pm-badge <?php echo h($statusClass); ?>"><?php echo h($statusLabels[$order['status']] ?? $order['status']); ?></span></td>
+                                <td><span class="pm-badge <?php echo h($statusClass); ?>"><?php echo h($order['status']); ?></span></td>
                                 <td><?php echo h($order['created_at']); ?></td>
                                 <td>
                                     <a class="pm-btn pm-btn-edit pm-btn-sm" href="<?php echo h(buildFilterQuery(['order_id' => intval($order['order_id'])])); ?>">查看詳情</a>
@@ -347,7 +283,7 @@ if ($orderResult) {
                 <div class="om-empty">訂單不存在。</div>
             <?php else: ?>
                 <?php
-                $discountAmount = isset($detail['discount_amount']) ? (float)$detail['discount_amount'] : 0.0;
+                $discountAmount = isset($detail['discount_amount']) ? (float)$detail['discount_amount'] : max(0, (float)$detail['subtotal_amount'] + (float)$detail['shipping_fee'] - (float)$detail['total_amount']);
                 $shippingNotes = '';
                 if (isset($detail['shipping_notes']) && $detail['shipping_notes'] !== '') {
                     $shippingNotes = $detail['shipping_notes'];
@@ -356,29 +292,7 @@ if ($orderResult) {
                 }
                 $trackingRaw = isset($detail['tracking_number']) ? $detail['tracking_number'] : '';
                 list($shippingCarrier, $trackingNumber) = splitTrackingNumber($trackingRaw);
-                $nextActions = orderNextActions($detail['status']);
-                $statusOptions = orderAllowedStatusOptions($detail['status']);
                 ?>
-                <div class="om-flow" aria-label="訂單狀態流程">
-                    <?php foreach ($allowedStatuses as $status): ?>
-                        <span class="om-flow-step <?php echo $detail['status'] === $status ? 'is-current' : ''; ?>"><?php echo h($statusLabels[$status] ?? $status); ?></span>
-                    <?php endforeach; ?>
-                </div>
-                <div class="om-status-note">
-                    <?php echo h(orderStatusHelpText($detail['status'])); ?>
-                    <?php if (!empty($nextActions)): ?>
-                        可執行下一步：
-                        <?php
-                        $nextLabels = array_map(function ($action) use ($statusLabels) {
-                            return $statusLabels[$action['status']] ?? $action['status'];
-                        }, $nextActions);
-                        echo h(implode('、', $nextLabels));
-                        ?>。
-                    <?php else: ?>
-                        目前沒有可切換的下一個狀態。
-                    <?php endif; ?>
-                </div>
-
                 <div class="om-detail-grid">
                     <div>
                         <h3 class="om-section-title">訂單 / 付款</h3>
@@ -386,6 +300,7 @@ if ($orderResult) {
                             <dt>訂單編號</dt><dd>#<?php echo intval($detail['order_id']); ?></dd>
                             <dt>客戶姓名</dt><dd><?php echo h($detail['user_name'] ?: $detail['recipient_name']); ?></dd>
                             <dt>聯絡信箱</dt><dd><?php echo h($detail['email'] ?: '-'); ?></dd>
+                            <dt>優惠卷</dt><dd><?php echo !empty($detail['coupon_id']) ? h(($detail['coupon_name'] ?? ('#' . $detail['coupon_id'])) . (!empty($detail['coupon_code']) ? '（' . $detail['coupon_code'] . '）' : '')) : '-'; ?></dd>
                             <dt>付款方式</dt><dd><?php echo h($detail['payment_method']); ?></dd>
                             <dt>小計</dt><dd>NT$ <?php echo number_format((float)$detail['subtotal_amount']); ?></dd>
                             <dt>運費</dt><dd>NT$ <?php echo number_format((float)$detail['shipping_fee']); ?></dd>
@@ -404,23 +319,6 @@ if ($orderResult) {
                         </dl>
                     </div>
                 </div>
-
-                <?php if (!empty($nextActions)): ?>
-                    <div class="om-quick-actions">
-                        <strong style="color:#0f172a;">常用下一步</strong>
-                        <?php foreach ($nextActions as $nextAction): ?>
-                            <form action="backend_action.php" method="POST">
-                                <input type="hidden" name="action" value="update_order_status">
-                                <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
-                                <input type="hidden" name="status" value="<?php echo h($nextAction['status']); ?>">
-                                <input type="hidden" name="shipping_carrier" value="<?php echo h($shippingCarrier); ?>">
-                                <input type="hidden" name="tracking_number" value="<?php echo h($trackingNumber); ?>">
-                                <input type="hidden" name="admin_notes" value="<?php echo h($detail['admin_notes'] ?? ''); ?>">
-                                <button class="pm-btn <?php echo $nextAction['status'] === 'CANCELLED' ? 'pm-btn-danger' : 'pm-btn-main'; ?> pm-btn-sm" type="submit"><?php echo h($nextAction['label']); ?></button>
-                            </form>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
 
                 <div style="margin-top:16px;">
                     <h3 class="om-section-title">購買商品明細</h3>
@@ -462,11 +360,10 @@ if ($orderResult) {
                             <div class="pm-col-3">
                                 <label for="status_update">訂單狀態</label>
                                 <select class="pm-select" id="status_update" name="status">
-                                    <?php foreach ($statusOptions as $status): ?>
-                                        <option value="<?php echo h($status); ?>" <?php echo $detail['status'] === $status ? 'selected' : ''; ?>><?php echo h($statusLabels[$status] ?? $status); ?></option>
+                                    <?php foreach ($allowedStatuses as $status): ?>
+                                        <option value="<?php echo h($status); ?>" <?php echo $detail['status'] === $status ? 'selected' : ''; ?>><?php echo h($status); ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <div class="om-meta" style="margin-top:6px;">只顯示目前允許的下一步；若只改物流或備註，維持原狀態即可。</div>
                             </div>
                             <div class="pm-col-3">
                                 <label for="shipping_carrier">物流公司</label>
@@ -484,6 +381,18 @@ if ($orderResult) {
                                 <button class="pm-btn pm-btn-main" type="submit">儲存更新</button>
                             </div>
                         </div>
+                    </form>
+                </div>
+
+                <div style="margin-top:18px; padding-top:18px; border-top:1px solid #e2e8f0;">
+                    <h3 class="om-section-title">危險區域</h3>
+                    <form action="backend_action.php" method="POST" id="deleteOrderForm" style="display:flex; gap:10px; align-items:center;">
+                        <input type="hidden" name="action" value="delete_order">
+                        <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
+                        <label for="delete_older_days" style="margin:0;">此訂單已完成超過 (天)：</label>
+                        <input class="pm-input" type="number" id="delete_older_days" name="delete_older_days" min="0" value="0" style="max-width:80px; margin:0;">
+                        <span style="font-size:12px; color:#64748b;">（0 = 直接刪除，不檢查時間）</span>
+                        <button class="pm-btn pm-btn-danger" type="button" onclick="confirmDeleteOrder()">刪除此訂單</button>
                     </form>
                 </div>
             <?php endif; ?>
@@ -510,24 +419,14 @@ if ($orderResult) {
         });
     });
 
-    const bulkForm = document.getElementById('bulkOrdersForm');
-    if (bulkForm) {
-        bulkForm.addEventListener('submit', (event) => {
-            const selected = checkboxes.filter(item => item.checked);
-            const status = bulkForm.querySelector('select[name="status"]');
-            if (selected.length === 0) {
-                event.preventDefault();
-                alert('請先勾選要更新的訂單。');
-                return;
-            }
-            if (!status || status.value === '') {
-                event.preventDefault();
-                alert('請先選擇批次狀態。');
-                return;
-            }
-            if (!confirm('系統會依訂單流程逐筆檢查，無法合法切換的訂單會被擋下。確定要套用批次更新嗎？')) {
-                event.preventDefault();
-            }
-        });
+    function confirmDeleteOrder() {
+        const deleteOlderDays = parseInt(document.getElementById('delete_older_days').value) || 0;
+        const msg = deleteOlderDays > 0
+            ? '確定要刪除這筆訂單嗎？系統會檢查該訂單是否已完成超過 ' + deleteOlderDays + ' 天。'
+            : '⚠️ 警告：確定要立即刪除這筆已完成的訂單及所有商品記錄嗎？此操作無法復原！';
+
+        if (confirm(msg)) {
+            document.getElementById('deleteOrderForm').submit();
+        }
     }
 </script>

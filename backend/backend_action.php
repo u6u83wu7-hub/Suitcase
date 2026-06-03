@@ -52,6 +52,15 @@ function goMarketing($message = '', $extraParams = []) {
     exit();
 }
 
+function goCoupon($message = '') {
+    $params = ['page' => 'coupon'];
+    if ($message !== '') {
+        $params['error'] = $message;
+    }
+    header('Location: backend.php?' . http_build_query($params));
+    exit();
+}
+
 function tableColumns($conn, $tableName) {
     $columns = [];
     $tableName = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -89,6 +98,9 @@ $actions = [
     'sync_promotion_products' => 'actions/MarketingActions.php',
     'upload_promotion_banner' => 'actions/MarketingActions.php',
     'delete_promotion_banner' => 'actions/MarketingActions.php',
+    'add_coupon' => 'actions/CouponActions.php',
+    'send_coupon' => 'actions/CouponActions.php',
+    'redeem_coupon_code' => 'actions/CouponActions.php',
     'add_category' => 'actions/CategoryActions.php',
     'update_category' => 'actions/CategoryActions.php',
     'delete_category' => 'actions/CategoryActions.php',
