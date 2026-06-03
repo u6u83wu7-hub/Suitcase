@@ -193,7 +193,7 @@ if ($activeResult) {
 						<th style="width:90px;">啟用</th>
 						<th style="width:90px;">商品數</th>
 						<th style="width:110px;">首頁跑馬燈</th>
-						<th style="width:200px;">操作</th>
+						<th style="width:260px;">操作</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -250,6 +250,12 @@ if ($activeResult) {
 										</button>
 										<button class="pm-btn pm-btn-sub pm-btn-sm js-bind-products" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">商品綁定</button>
 										<button class="pm-btn pm-btn-edit pm-btn-sm js-upload-banner" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">首頁跑馬燈</button>
+										
+										<form action="backend_action.php" method="POST" style="display:inline; margin:0;" onsubmit="return confirm('警告：確定要永久刪除此活動嗎？這將會同步移除綁定的商品折扣與活動圖片！');">
+											<input type="hidden" name="action" value="delete_promotion">
+											<input type="hidden" name="promotion_id" value="<?php echo intval($promo['id']); ?>">
+											<button class="pm-btn pm-btn-danger pm-btn-sm" type="submit" style="background:#b91c1c; color:#fff; border-color:#b91c1c;">刪除</button>
+										</form>
 									</div>
 								</td>
 							</tr>

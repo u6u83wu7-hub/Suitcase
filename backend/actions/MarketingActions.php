@@ -153,7 +153,7 @@ function applyPromotionDiscount($conn, $productIds, $discountType, $discountValu
     }
 
     if ($discountType === 'PERCENT') {
-        $stmt = $conn->prepare("UPDATE product_variants SET special_price = GREATEST(ROUND(member_price - (member_price * ? / 100), 2), 0) WHERE product_id = ?");
+        $stmt = $conn->prepare("UPDATE product_variants SET special_price = GREATEST(ROUND(original_price - (original_price * ? / 100), 2), 0) WHERE product_id = ?");
         foreach ($productIds as $pid) {
             $stmt->bind_param('di', $discountValue, $pid);
             $stmt->execute();
@@ -161,7 +161,7 @@ function applyPromotionDiscount($conn, $productIds, $discountType, $discountValu
         return;
     }
 
-    $stmt = $conn->prepare("UPDATE product_variants SET special_price = GREATEST(ROUND(member_price - ?, 2), 0) WHERE product_id = ?");
+    $stmt = $conn->prepare("UPDATE product_variants SET special_price = GREATEST(ROUND(original_price - ?, 2), 0) WHERE product_id = ?");
     foreach ($productIds as $pid) {
         $stmt->bind_param('di', $discountValue, $pid);
         $stmt->execute();
@@ -242,7 +242,6 @@ if ($action === 'add_promotion') {
     $productIds = isset($_POST['product_ids']) && is_array($_POST['product_ids']) ? $_POST['product_ids'] : [];
     $isActive = boolPost('is_active') ? 1 : 0;
 
-    // 將所有填寫的資料打包，如果發生錯誤可以帶回前端
     $errorParams = [
         'open' => 'create',
         'name' => $name,
@@ -327,7 +326,6 @@ if ($action === 'update_promotion') {
         goMarketing('活動資料不完整', 'edit');
     }
 
-    // 將所有填寫的資料打包，針對 edit 模式帶入對應的 key
     $errorParams = [
         'open' => 'edit',
         'promotion_id' => $promotionId,
@@ -528,5 +526,61 @@ if ($action === 'delete_promotion_banner') {
     } catch (Exception $e) {
         $conn->rollback();
         goMarketing($e->getMessage());
+    }
+}
+
+// 💡 這裡加上了刪除活動的邏輯
+if ($action === 'delete_promotion') {
+    $promotionId = isset($_POST['promotion_id']) ? intval($_POST['promotion_id']) : 0;
+
+    if ($promotionId <= 0) {
+        goMarketing('無效的活動資料');
+    }
+
+    $conn->begin_transaction();
+    try {
+        // 1. 抓取被綁定的商品 ID (為了後續清除特價)
+        $stmt = $conn->prepare("SELECT product_id FROM promotion_products WHERE promotion_id = ?");
+        $stmt->bind_param('i', $promotionId);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $productIds = [];
+        while ($row = $res->fetch_assoc()) {
+            $productIds[] = $row['product_id'];
+        }
+
+        // 2. 刪除相關跑馬燈圖片與資料庫紀錄
+        $stmt = $conn->prepare("SELECT banner_image_url FROM promotion_banners WHERE promotion_id = ?");
+        $stmt->bind_param('i', $promotionId);
+        $stmt->execute();
+        $banners = $stmt->get_result();
+        while ($b = $banners->fetch_assoc()) {
+            $filePath = realpath(__DIR__ . '/../../' . ltrim($b['banner_image_url'], '/'));
+            if ($filePath && is_file($filePath)) @unlink($filePath);
+        }
+        $conn->query("DELETE FROM promotion_banners WHERE promotion_id = {$promotionId}");
+
+        // 3. 刪除活動主圖
+        $stmt = $conn->prepare("SELECT promotion_image_url FROM promotions WHERE id = ?");
+        $stmt->bind_param('i', $promotionId);
+        $stmt->execute();
+        $imgRes = $stmt->get_result();
+        if ($imgRow = $imgRes->fetch_assoc()) {
+            $imgPath = realpath(__DIR__ . '/../../' . ltrim($imgRow['promotion_image_url'], '/'));
+            if ($imgPath && is_file($imgPath)) @unlink($imgPath);
+        }
+
+        // 4. 清除商品綁定與活動本身
+        $conn->query("DELETE FROM promotion_products WHERE promotion_id = {$promotionId}");
+        $conn->query("DELETE FROM promotions WHERE id = {$promotionId}");
+
+        // 5. 將這些商品的 special_price 清空為 NULL
+        clearPromotionPrices($conn, $productIds);
+
+        $conn->commit();
+        goMarketing('活動已成功刪除！');
+    } catch (Exception $e) {
+        $conn->rollback();
+        goMarketing('刪除活動失敗：' . $e->getMessage());
     }
 }
