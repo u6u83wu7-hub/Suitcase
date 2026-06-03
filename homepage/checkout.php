@@ -1,16 +1,13 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 $pageTitle = '結帳 | All Pass';
 $activeNav = '';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
-
-date_default_timezone_set('Asia/Taipei');
-require_once __DIR__ . '/includes/promotion_price_sync.php';
-require_once __DIR__ . '/includes/security.php';
-
-apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -23,7 +20,40 @@ if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
 }
 $conn->set_charset('utf8mb4');
-apRunPromotionSync($conn);
+require_once __DIR__ . '/includes/storefront_helpers.php';
+
+if (!function_exists('sfResolveFrontPrice')) {
+    function sfResolveFrontPrice($conn, $productId, $originalPrice, $memberPrice = null) {
+        $isMember = false;
+        if (isset($_SESSION['user_id']) && $conn instanceof mysqli) {
+            $stmt = $conn->prepare('SELECT membership_level FROM users WHERE user_id = ? LIMIT 1');
+            if ($stmt) {
+                $userId = intval($_SESSION['user_id']);
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                if ($res && ($row = $res->fetch_assoc())) {
+                    $isMember = intval($row['membership_level'] ?? 0) > 0;
+                }
+                $stmt->close();
+            }
+        }
+
+        $basePrice = ($isMember && $memberPrice !== null && $memberPrice !== '' && floatval($memberPrice) > 0)
+            ? floatval($memberPrice)
+            : floatval($originalPrice);
+
+        return [
+            'is_member' => $isMember,
+            'base_price' => $basePrice,
+            'base_label' => $isMember ? '會員價' : '原價',
+            'final_price' => $basePrice,
+            'headline_label' => $isMember ? '會員價' : '原價',
+            'has_promotion' => false,
+            'promotion' => null,
+        ];
+    }
+}
 
 function checkoutTableExists($conn, $tableName) {
     $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -94,7 +124,6 @@ $hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
 $hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
 $hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
 $hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumns, true);
-$hasInventoryDeductedColumn = in_array('inventory_deducted', $orderColumns, true);
 
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
@@ -144,7 +173,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quantities']) && is_a
 
 $items = [];
 $totalAmount = 0;
-$stockWarnings = [];
 if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
     $idList = implode(',', array_map('intval', $selectedIds));
     $imageOrder = 'pi.is_main DESC, pi.sort_order ASC, pi.image_id ASC';
@@ -158,9 +186,8 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
             COALESCE(v.color, '') AS variant_color,
             COALESCE(v.size_inches, '') AS variant_size,
             COALESCE(v.sku_code, '') AS sku_code,
-            COALESCE(v.stock_available, 0) AS variant_stock,
             COALESCE(v.original_price, 0) AS original_price,
-            COALESCE(v.special_price, NULL) AS special_price,
+            COALESCE(v.member_price, 0) AS member_price,
             COALESCE((
                 SELECT pi.image_url
                 FROM product_images pi
@@ -179,7 +206,7 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
                 LIMIT 1
             ), '') AS image_url,
             COALESCE((
-                SELECT MIN(COALESCE(pv.special_price, pv.original_price))
+                SELECT MIN(COALESCE(pv.member_price, pv.original_price, 0))
                 FROM product_variants pv
                 WHERE pv.product_id = p.product_id
             ), 0) AS fallback_price
@@ -198,19 +225,42 @@ foreach ($items as &$item) {
         $item['quantity'] = $postedQuantities[$cartItemId];
     }
 
-    $displayPrice = ($item['special_price'] !== null && $item['special_price'] !== '') ? floatval($item['special_price']) : floatval($item['original_price']);
+    $priceInfo = sfResolveFrontPrice($conn, intval($item['product_id'] ?? 0), $item['original_price'] ?? 0, $item['member_price'] ?? null);
+    $displayPrice = floatval($priceInfo['final_price']);
     if ($displayPrice <= 0) {
         $displayPrice = floatval($item['fallback_price']);
     }
     $item['display_price'] = $displayPrice;
     $item['subtotal'] = $displayPrice * intval($item['quantity']);
-    $item['variant_stock'] = isset($item['variant_stock']) ? intval($item['variant_stock']) : 0;
-    if (intval($item['quantity']) > $item['variant_stock']) {
-        $stockWarnings[] = $item['product_name'] . ' 庫存不足，目前庫存 ' . $item['variant_stock'] . '，你選擇 ' . intval($item['quantity']) . '。';
-    }
     $totalAmount += $item['subtotal'];
 }
 unset($item);
+
+$availableCoupons = [];
+if (checkoutTableExists($conn, 'coupon_distributions') && checkoutTableExists($conn, 'coupons')) {
+    $couponSql = "
+        SELECT
+            c.coupon_id,
+            c.coupon_name,
+            c.coupon_code,
+            c.coupon_type,
+            c.coupon_value,
+            c.min_order_amount,
+            c.start_at,
+            c.end_at,
+            SUM(cd.quantity) AS available_quantity,
+            MAX(cd.created_at) AS received_at
+        FROM coupon_distributions cd
+        INNER JOIN coupons c ON c.coupon_id = cd.coupon_id
+        WHERE cd.user_id = {$userId}
+          AND c.is_active = 1
+          AND (c.start_at IS NULL OR c.start_at <= NOW())
+          AND (c.end_at IS NULL OR c.end_at >= NOW())
+        GROUP BY c.coupon_id, c.coupon_name, c.coupon_code, c.coupon_type, c.coupon_value, c.min_order_amount, c.start_at, c.end_at
+        ORDER BY received_at DESC, c.coupon_id DESC
+    ";
+    $availableCoupons = checkoutFetchRows($conn, $couponSql);
+}
 
 $errors = [];
 $checkoutDone = false;
@@ -236,17 +286,11 @@ $formCardNumber = $_POST['card_number'] ?? '';
 $formExpiryMonth = $_POST['expiry_month'] ?? $defaultCardExpiryMonth;
 $formExpiryYear = $_POST['expiry_year'] ?? $defaultCardExpiryYear;
 $formNote = $_POST['note'] ?? '';
+$formCouponId = isset($_POST['coupon_id']) ? intval($_POST['coupon_id']) : 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'place_order') {
-    if (!apValidateCsrf()) {
-        $errors[] = '表單驗證失敗，請重新操作。';
-    }
-
     if (empty($items)) {
         $errors[] = '請先選擇購物車中的商品。';
-    }
-    foreach ($stockWarnings as $warning) {
-        $errors[] = $warning;
     }
 
     $cardDigits = preg_replace('/\D+/', '', $formCardNumber);
@@ -279,7 +323,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     if (empty($errors)) {
         $shippingFee = 0.00;
-        $grandTotal = $totalAmount + $shippingFee;
+        $appliedCouponId = null;
+        $discountAmount = 0.00;
+
+        if ($formCouponId > 0) {
+            $couponStmt = $conn->prepare("SELECT coupon_id, coupon_type, coupon_value, min_order_amount, is_active, start_at, end_at, usage_limit, used_count FROM coupons WHERE coupon_id = ? LIMIT 1");
+            if ($couponStmt) {
+                $couponStmt->bind_param('i', $formCouponId);
+                $couponStmt->execute();
+                $couponRes = $couponStmt->get_result();
+                $couponRow = ($couponRes && $couponRes->num_rows > 0) ? $couponRes->fetch_assoc() : null;
+                $couponStmt->close();
+
+                if ($couponRow) {
+                    $ownershipStmt = $conn->prepare("SELECT distribution_id FROM coupon_distributions WHERE coupon_id = ? AND user_id = ? LIMIT 1");
+                    $couponOwned = false;
+                    if ($ownershipStmt) {
+                        $ownershipStmt->bind_param('ii', $formCouponId, $userId);
+                        $ownershipStmt->execute();
+                        $ownershipRes = $ownershipStmt->get_result();
+                        $couponOwned = $ownershipRes && $ownershipRes->num_rows > 0;
+                        $ownershipStmt->close();
+                    }
+
+                    $now = time();
+                    $couponStart = !empty($couponRow['start_at']) ? strtotime($couponRow['start_at']) : false;
+                    $couponEnd = !empty($couponRow['end_at']) ? strtotime($couponRow['end_at']) : false;
+                    $couponValue = (float)($couponRow['coupon_value'] ?? 0);
+                    $minOrderAmount = (float)($couponRow['min_order_amount'] ?? 0);
+
+                    if ((int)$couponRow['is_active'] === 1 &&
+                        $couponOwned &&
+                        ($couponStart === false || $now >= $couponStart) &&
+                        ($couponEnd === false || $now <= $couponEnd) &&
+                        ((int)($couponRow['usage_limit'] ?? 0) <= 0 || (int)($couponRow['used_count'] ?? 0) < (int)$couponRow['usage_limit']) &&
+                        $totalAmount >= $minOrderAmount) {
+                        if (($couponRow['coupon_type'] ?? '') === 'DISCOUNT') {
+                            $discountAmount = round($totalAmount * $couponValue / 100, 2);
+                        } elseif (($couponRow['coupon_type'] ?? '') === 'REDUCE') {
+                            $discountAmount = round($couponValue, 2);
+                        }
+                        $appliedCouponId = (int)$couponRow['coupon_id'];
+                    }
+                }
+            }
+        }
+
+        $discountAmount = min(max($discountAmount, 0.00), $totalAmount + $shippingFee);
+        $grandTotal = max(round($totalAmount + $shippingFee - $discountAmount, 2), 0.00);
         $paymentMethod = 'credit_card';
         $formCardLast4 = substr($cardDigits, -4);
 
@@ -295,6 +386,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 'status',
                 'subtotal_amount',
                 'shipping_fee',
+                'coupon_id',
+                'discount_amount',
                 'total_amount',
                 'recipient_name',
                 'recipient_phone',
@@ -306,18 +399,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $orderStatus,
                 $totalAmount,
                 $shippingFee,
+                $appliedCouponId,
+                $discountAmount,
                 $grandTotal,
                 $formRecipientName,
                 $formRecipientPhone,
                 $formShippingAddress,
             ];
-            $orderTypes = 'sisdddsss';
-
-            if ($hasInventoryDeductedColumn) {
-                $orderColumnsList[] = 'inventory_deducted';
-                $orderValues[] = 1;
-                $orderTypes .= 'i';
-            }
+            $orderTypes = 'sisddiddsss';
 
             if ($hasShippingNotesColumn) {
                 $orderColumnsList[] = 'shipping_notes';
@@ -408,10 +497,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
 
             $itemSql = 'INSERT INTO order_items (' . implode(', ', $itemColumns) . ') VALUES (' . implode(', ', $itemPlaceholders) . ')';
-            $stockStmt = $conn->prepare('UPDATE product_variants SET stock_available = stock_available - ? WHERE variant_id = ? AND stock_available >= ?');
-            if (!$stockStmt) {
-                throw new RuntimeException('無法建立庫存扣減語句。');
-            }
 
             foreach ($items as $item) {
                 $quantity = intval($item['quantity']);
@@ -424,16 +509,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $lockedPrice = $unitPrice;
                 $productId = intval($item['product_id']);
                 $subtotalAmount = $lockedPrice * $quantity;
-
-                if ($variantId <= 0) {
-                    throw new RuntimeException('商品規格資料不完整，無法建立訂單。');
-                }
-
-                $stockStmt->bind_param('iii', $quantity, $variantId, $quantity);
-                $stockStmt->execute();
-                if ($stockStmt->affected_rows !== 1) {
-                    throw new RuntimeException('商品庫存不足，請返回購物車調整數量。');
-                }
 
                 $itemValues = [$orderId];
                 if ($hasOrderItemProductIdColumn) {
@@ -472,7 +547,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
                 $itemStmt->close();
             }
-            $stockStmt->close();
+
+            if ($appliedCouponId !== null) {
+                $distributionStmt = $conn->prepare(
+                    "SELECT distribution_id, quantity
+                     FROM coupon_distributions
+                     WHERE coupon_id = ? AND user_id = ? AND quantity > 0
+                     ORDER BY created_at DESC, distribution_id DESC
+                     LIMIT 1
+                     FOR UPDATE"
+                );
+                if (!$distributionStmt) {
+                    throw new RuntimeException('無法更新優惠卷使用紀錄。');
+                }
+
+                $distributionStmt->bind_param('ii', $appliedCouponId, $userId);
+                $distributionStmt->execute();
+                $distributionRes = $distributionStmt->get_result();
+                $distributionRow = ($distributionRes && $distributionRes->num_rows > 0) ? $distributionRes->fetch_assoc() : null;
+                $distributionStmt->close();
+
+                if (!$distributionRow) {
+                    throw new RuntimeException('找不到可使用的優惠卷紀錄。');
+                }
+
+                $distributionId = intval($distributionRow['distribution_id']);
+                $distributionQuantity = intval($distributionRow['quantity']);
+
+                if ($distributionQuantity > 1) {
+                    $updateDistributionStmt = $conn->prepare("UPDATE coupon_distributions SET quantity = quantity - 1 WHERE distribution_id = ?");
+                    if (!$updateDistributionStmt) {
+                        throw new RuntimeException('更新優惠卷數量失敗。');
+                    }
+                    $updateDistributionStmt->bind_param('i', $distributionId);
+                    if (!$updateDistributionStmt->execute()) {
+                        throw new RuntimeException('更新優惠卷數量失敗。');
+                    }
+                    $updateDistributionStmt->close();
+                } else {
+                    $deleteDistributionStmt = $conn->prepare("DELETE FROM coupon_distributions WHERE distribution_id = ?");
+                    if (!$deleteDistributionStmt) {
+                        throw new RuntimeException('刪除優惠卷紀錄失敗。');
+                    }
+                    $deleteDistributionStmt->bind_param('i', $distributionId);
+                    if (!$deleteDistributionStmt->execute()) {
+                        throw new RuntimeException('刪除優惠卷紀錄失敗。');
+                    }
+                    $deleteDistributionStmt->close();
+                }
+            }
 
             $cartIds = array_map('intval', $selectedIds);
             if (!empty($cartIds)) {
@@ -530,6 +653,74 @@ if ($memberFillData['expiry_year'] === '') {
 include 'header.php';
 ?>
 
+<style>
+    .coupon-option {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #fff;
+        cursor: pointer;
+        transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .coupon-option.is-selected {
+        border-color: #db6b6b;
+        background: #fff7f7;
+        box-shadow: 0 10px 24px rgba(219, 107, 107, 0.08);
+    }
+    .coupon-option input[type="radio"] {
+        margin-top: 4px;
+        transform: scale(1.05);
+    }
+    .coupon-option-main {
+        flex: 1;
+        min-width: 0;
+    }
+    .coupon-option-title {
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 4px;
+    }
+    .coupon-option-sub {
+        font-size: 13px;
+        line-height: 1.6;
+        color: #6b7280;
+    }
+    .coupon-option-meta {
+        text-align: right;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #374151;
+        white-space: nowrap;
+    }
+    .coupon-summary {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border-radius: 12px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+    }
+    .coupon-summary-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+        font-size: 14px;
+        color: #334155;
+    }
+    .coupon-summary-row:last-child {
+        margin-bottom: 0;
+    }
+    .coupon-summary-total {
+        font-size: 18px;
+        font-weight: 800;
+        color: #111827;
+    }
+</style>
+
 <section style="padding:190px 5% 60px; max-width:1300px; margin:0 auto;">
     <a href="cart.php" style="color:#555; display:inline-block; margin-bottom:18px;">⬅️ 返回購物車</a>
     <h1 style="font-size:34px; margin-bottom:8px;">結帳</h1>
@@ -540,15 +731,6 @@ include 'header.php';
             <?php foreach ($errors as $error): ?>
                 <div>• <?php echo htmlspecialchars($error); ?></div>
             <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-
-    <?php if (empty($errors) && !empty($stockWarnings)): ?>
-        <div style="margin-bottom:16px; padding:14px 16px; border-radius:12px; background:#fff7ed; color:#9a3412; border:1px solid #fdba74; line-height:1.7;">
-            <?php foreach ($stockWarnings as $warning): ?>
-                <div>• <?php echo htmlspecialchars($warning); ?></div>
-            <?php endforeach; ?>
-            <div style="margin-top:6px;">請返回購物車調整數量後再結帳。</div>
         </div>
     <?php endif; ?>
 
@@ -599,7 +781,6 @@ include 'header.php';
                                                 <div>規格：<?php echo htmlspecialchars($variantLabel); ?></div>
                                             <?php endif; ?>
                                             <div>SKU：<?php echo htmlspecialchars($item['sku_code'] !== '' ? $item['sku_code'] : '-'); ?></div>
-                                            <div style="<?php echo intval($item['quantity']) > intval($item['variant_stock']) ? 'color:#b91c1c;font-weight:700;' : ''; ?>">庫存：<?php echo intval($item['variant_stock']); ?></div>
                                         </div>
                                     </td>
                                     <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['display_price'])); ?></td>
@@ -639,6 +820,71 @@ include 'header.php';
                             <div>
                                 <label style="display:block; font-weight:700; margin-bottom:6px;">地址備註</label>
                                 <input type="text" name="address_note" id="address_note" value="<?php echo htmlspecialchars($formAddressNote); ?>" style="width:100%; height:44px; padding:0 12px; border:1px solid #ddd; border-radius:10px;">
+                            </div>
+                            <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px;">
+                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                                    <h3 style="font-size:18px; margin:0;">使用優惠卷</h3>
+                                    <div style="font-size:13px; color:#6b7280;">選好後會即時顯示卷後價</div>
+                                </div>
+
+                                <?php if (!empty($availableCoupons)): ?>
+                                    <div id="couponOptions" style="display:grid; gap:10px;">
+                                        <label class="coupon-option <?php echo $formCouponId <= 0 ? 'is-selected' : ''; ?>">
+                                            <input type="radio" name="coupon_id" value="" <?php echo $formCouponId <= 0 ? 'checked' : ''; ?>>
+                                            <div class="coupon-option-main">
+                                                <div class="coupon-option-title">不使用優惠卷</div>
+                                                <div class="coupon-option-sub">保留原價結帳</div>
+                                            </div>
+                                        </label>
+
+                                        <?php foreach ($availableCoupons as $coupon): ?>
+                                            <?php
+                                            $couponId = intval($coupon['coupon_id']);
+                                            $couponType = $coupon['coupon_type'] ?? 'DISCOUNT';
+                                            $couponValue = (float)($coupon['coupon_value'] ?? 0);
+                                            $minOrderAmount = (float)($coupon['min_order_amount'] ?? 0);
+                                            $availableQuantity = intval($coupon['available_quantity'] ?? 0);
+                                            $valueLabel = $couponType === 'REDUCE'
+                                                ? '折抵 NT$ ' . number_format($couponValue)
+                                                : ($couponType === 'POINTS' ? number_format($couponValue) . ' 點' : rtrim(rtrim(number_format($couponValue, 2), '0'), '.') . '% 折扣');
+                                            $couponTitle = trim(($coupon['coupon_name'] ?? '未命名優惠卷') . (!empty($coupon['coupon_code']) ? '（' . $coupon['coupon_code'] . '）' : ''));
+                                            $selectedClass = $formCouponId === $couponId ? 'is-selected' : '';
+                                        ?>
+                                            <label class="coupon-option <?php echo $selectedClass; ?>">
+                                                <input type="radio"
+                                                       name="coupon_id"
+                                                       value="<?php echo $couponId; ?>"
+                                                       <?php echo $formCouponId === $couponId ? 'checked' : ''; ?>
+                                                       data-coupon-type="<?php echo htmlspecialchars($couponType); ?>"
+                                                       data-coupon-value="<?php echo htmlspecialchars((string)$couponValue); ?>"
+                                                       data-min-order="<?php echo htmlspecialchars((string)$minOrderAmount); ?>">
+                                                <div class="coupon-option-main">
+                                                    <div class="coupon-option-title"><?php echo htmlspecialchars($couponTitle); ?></div>
+                                                    <div class="coupon-option-sub"><?php echo htmlspecialchars($valueLabel); ?></div>
+                                                </div>
+                                                <div class="coupon-option-meta">
+                                                    <div>可用 <?php echo number_format($availableQuantity); ?> 張</div>
+                                                    <div>門檻 NT$ <?php echo number_format($minOrderAmount); ?></div>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+
+                                    <div class="coupon-summary">
+                                        <div class="coupon-summary-row"><span>商品總額</span><strong id="couponBaseAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
+                                        <div class="coupon-summary-row"><span>優惠折扣</span><strong id="couponDiscountAmount">NT$ 0</strong></div>
+                                        <div class="coupon-summary-row coupon-summary-total"><span>卷後價</span><strong id="couponFinalAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
+                                    </div>
+                                <?php else: ?>
+                                    <div style="padding:14px 16px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; color:#64748b; line-height:1.7;">
+                                        目前沒有可用的優惠卷。
+                                    </div>
+                                    <div class="coupon-summary">
+                                        <div class="coupon-summary-row"><span>商品總額</span><strong id="couponBaseAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
+                                        <div class="coupon-summary-row"><span>優惠折扣</span><strong id="couponDiscountAmount">NT$ 0</strong></div>
+                                        <div class="coupon-summary-row coupon-summary-total"><span>卷後價</span><strong id="couponFinalAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                             <div>
                                 <label style="display:block; font-weight:700; margin-bottom:6px;">付款方式</label>
@@ -693,7 +939,7 @@ include 'header.php';
                         </div>
                         <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
                             <a href="cart.php" style="display:inline-flex; align-items:center; justify-content:center; padding:12px 18px; border-radius:999px; background:#111; color:#fff; font-weight:700;">回購物車修改</a>
-                            <button type="submit" <?php echo !empty($stockWarnings) ? 'disabled' : ''; ?> style="padding:12px 18px; border:none; border-radius:999px; background:<?php echo !empty($stockWarnings) ? '#cbd5e1' : '#db6b6b'; ?>; color:#fff; font-weight:700; cursor:<?php echo !empty($stockWarnings) ? 'not-allowed' : 'pointer'; ?>;"><?php echo !empty($stockWarnings) ? '庫存不足，無法結帳' : '確認結帳'; ?></button>
+                            <button type="submit" style="padding:12px 18px; border:none; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">確認結帳</button>
                         </div>
                     </div>
                 </section>
@@ -703,6 +949,73 @@ include 'header.php';
 </section>
 
 <script>
+(function () {
+    const subtotal = <?php echo json_encode((float)$totalAmount, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const baseAmountEl = document.getElementById('couponBaseAmount');
+    const discountAmountEl = document.getElementById('couponDiscountAmount');
+    const finalAmountEl = document.getElementById('couponFinalAmount');
+    const couponCards = Array.from(document.querySelectorAll('.coupon-option'));
+    const couponRadios = Array.from(document.querySelectorAll('input[name="coupon_id"]'));
+
+    function formatAmount(value) {
+        return 'NT$ ' + Math.max(0, Number(value) || 0).toLocaleString('zh-TW', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function calculateDiscount(radio) {
+        if (!radio || radio.value === '') {
+            return 0;
+        }
+
+        const couponType = radio.dataset.couponType || '';
+        const couponValue = parseFloat(radio.dataset.couponValue || '0');
+        const minOrder = parseFloat(radio.dataset.minOrder || '0');
+
+        if (!Number.isFinite(couponValue) || couponValue <= 0 || subtotal < minOrder) {
+            return 0;
+        }
+
+        if (couponType === 'DISCOUNT') {
+            return Math.max(0, Math.round((subtotal * couponValue / 100) * 100) / 100);
+        }
+
+        if (couponType === 'REDUCE') {
+            return Math.max(0, Math.round(couponValue * 100) / 100);
+        }
+
+        return 0;
+    }
+
+    function syncCouponPreview() {
+        const selectedRadio = couponRadios.find((radio) => radio.checked) || null;
+        const discount = calculateDiscount(selectedRadio);
+        const finalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+
+        if (baseAmountEl) {
+            baseAmountEl.textContent = formatAmount(subtotal);
+        }
+        if (discountAmountEl) {
+            discountAmountEl.textContent = formatAmount(discount);
+        }
+        if (finalAmountEl) {
+            finalAmountEl.textContent = formatAmount(finalAmount);
+        }
+
+        couponCards.forEach((card) => {
+            const radio = card.querySelector('input[type="radio"]');
+            card.classList.toggle('is-selected', !!radio && radio.checked);
+        });
+    }
+
+    couponRadios.forEach((radio) => {
+        radio.addEventListener('change', syncCouponPreview);
+    });
+
+    syncCouponPreview();
+})();
+
 (function () {
     const fillButton = document.getElementById('fillMemberBtn');
     const notice = document.getElementById('fillNotice');
@@ -744,5 +1057,3 @@ include 'header.php';
 </script>
 
 <?php include 'footer.php'; $conn->close(); ?>
-
-

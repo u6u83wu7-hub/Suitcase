@@ -11,6 +11,8 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+require_once __DIR__ . '/includes/security.php';
+
 $userId = intval($_SESSION['user_id']);
 
 $orderStatusLabels = [
@@ -43,6 +45,28 @@ function fetchAssocRows($conn, $sql) {
         }
     }
     return $rows;
+}
+
+function couponTypeText($type) {
+    switch ($type) {
+        case 'REDUCE':
+            return '減價';
+        case 'POINTS':
+            return '點數回饋';
+        default:
+            return '折扣';
+    }
+}
+
+function couponTargetText($type) {
+    switch ($type) {
+        case 'ALL':
+            return '全體用戶';
+        case 'USE CODE':
+            return 'USE CODE';
+        default:
+            return '特定用戶';
+    }
 }
 
 $user = [
@@ -123,6 +147,49 @@ if (tableExists($conn, 'orders')) {
     }
 }
 
+// 優惠卷持有與明細（來源：後台發送紀錄）
+$couponRows = [];
+$couponCount = 0;
+$couponNotice = '';
+if (tableExists($conn, 'coupon_distributions')) {
+    $couponSql = "
+        SELECT
+            cd.distribution_id,
+            cd.coupon_id,
+            cd.user_id,
+            cd.quantity,
+            cd.target_type,
+            cd.created_at,
+            c.coupon_name,
+            c.coupon_type,
+            c.coupon_value,
+            c.coupon_code,
+            c.min_order_amount,
+            c.usage_limit,
+            c.used_count,
+            c.is_active,
+            c.start_at,
+            c.end_at,
+            u.name AS source_user_name,
+            u.email AS source_user_email
+        FROM coupon_distributions cd
+        LEFT JOIN coupons c ON c.coupon_id = cd.coupon_id
+        LEFT JOIN users u ON u.user_id = cd.user_id
+        WHERE cd.user_id = {$userId}
+        ORDER BY cd.created_at DESC, cd.distribution_id DESC
+    ";
+    $couponRows = fetchAssocRows($conn, $couponSql);
+    foreach ($couponRows as $couponRow) {
+        $couponCount += max(1, (int)($couponRow['quantity'] ?? 1));
+    }
+}
+
+if (!empty($_GET['coupon_success'])) {
+    $couponNotice = '<div style="padding:12px 14px; border-radius:10px; background:#ecfdf5; color:#047857; margin-bottom:16px;">優惠卷已成功加入您的會員資料。</div>';
+} elseif (!empty($_GET['coupon_error'])) {
+    $couponNotice = '<div style="padding:12px 14px; border-radius:10px; background:#fef2f2; color:#b91c1c; margin-bottom:16px;">' . htmlspecialchars($_GET['coupon_error']) . '</div>';
+}
+
 include 'header.php';
 ?>
 
@@ -130,7 +197,7 @@ include 'header.php';
     <h1 style="font-size:34px; margin-bottom:8px;">會員中心</h1>
     <p style="color:#666; margin-bottom:22px;">歡迎回來，<?php echo htmlspecialchars($user['name']); ?>。你可以在這裡查看帳號、購物車、收藏與購買紀錄。</p>
 
-    <div style="display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin-bottom:24px;">
+    <div style="display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:14px; margin-bottom:24px;">
         <div style="background:#fff; border:1px solid #eee; border-radius:12px; padding:14px;">
             <div style="font-size:13px; color:#666;">購物車項目</div>
             <div style="font-size:26px; font-weight:700;"><?php echo count($cartRows); ?></div>
@@ -146,6 +213,10 @@ include 'header.php';
         <div style="background:#fff; border:1px solid #eee; border-radius:12px; padding:14px;">
             <div style="font-size:13px; color:#666;">會員點數</div>
             <div style="font-size:26px; font-weight:700;"><?php echo number_format($user['points_balance']); ?></div>
+        </div>
+        <div style="background:#fff; border:1px solid #eee; border-radius:12px; padding:14px;">
+            <div style="font-size:13px; color:#666;">持有優惠卷</div>
+            <div style="font-size:26px; font-weight:700;"><?php echo number_format($couponCount); ?></div>
         </div>
     </div>
 
@@ -164,7 +235,7 @@ include 'header.php';
             </div>
         </section>
 
-        <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
+        <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; max-height:320px; overflow:auto;">
             <h2 style="font-size:20px; margin-bottom:12px;">購物車</h2>
             <?php if (!empty($cartRows)): ?>
                 <ul style="padding-left:16px; line-height:1.8; color:#444;">
@@ -180,7 +251,7 @@ include 'header.php';
             </div>
         </section>
 
-        <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
+        <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; max-height:320px; overflow:auto;">
     <h2 style="font-size:20px; margin-bottom:12px;">收藏</h2>
     <?php if (!empty($favoriteRows)): ?>
         <ul style="padding-left:16px; line-height:1.8; color:#444;">
@@ -200,7 +271,7 @@ include 'header.php';
     <?php endif; ?>
 </section>
 
-        <section id="order-history" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px;">
+        <section id="order-history" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; max-height:420px; overflow:auto;">
             <h2 style="font-size:20px; margin-bottom:12px;">購買紀錄</h2>
             <?php if (!empty($orderRows)): ?>
                 <div style="overflow:auto;">
@@ -241,11 +312,67 @@ include 'header.php';
             <?php endif; ?>
         </section>
     </div>
+
+    <?php echo $couponNotice; ?>
+
+    <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; margin-top:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+            <h2 style="font-size:20px; margin:0;">優惠卷細節</h2>
+            <button type="button" id="openRedeemCoupon" style="padding:10px 16px; border-radius:999px; background:#111; color:#fff; font-weight:700; border:none; cursor:pointer;">+ 新增優惠卷</button>
+        </div>
+        <?php if (!empty($couponRows)): ?>
+            <div style="overflow:auto; max-height:320px;">
+                <table style="width:100%; border-collapse:collapse; font-size:14px; min-width:700px;">
+                    <thead>
+                        <tr style="text-align:left; border-bottom:1px solid #eee; color:#666;">
+                            <th style="padding:8px 6px;">優惠卷</th>
+                            <th style="padding:8px 6px;">類型</th>
+                            <th style="padding:8px 6px;">張數</th>
+                            <th style="padding:8px 6px;">發送時間</th>
+                            <th style="padding:8px 6px;">結束時間</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($couponRows as $coupon): ?>
+                            <tr style="border-bottom:1px solid #f3f3f3;">
+                                <td style="padding:8px 6px; font-weight:700;"><?php echo htmlspecialchars($coupon['coupon_name'] ?? '未命名優惠卷'); ?></td>
+                                <td style="padding:8px 6px;"><?php echo htmlspecialchars(couponTypeText($coupon['coupon_type'] ?? 'DISCOUNT')); ?></td>
+                                <td style="padding:8px 6px;"><?php echo number_format((int)($coupon['quantity'] ?? 1)); ?></td>
+                                <td style="padding:8px 6px;"><?php echo htmlspecialchars($coupon['created_at'] ?? ''); ?></td>
+                                <td style="padding:8px 6px;"><?php echo htmlspecialchars($coupon['end_at'] ?? ''); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p style="color:#777;">目前尚未收到任何優惠卷。</p>
+        <?php endif; ?>
+    </section>
 </section>
+
+<div id="redeemCouponModal" style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(15,23,42,.6); z-index:999; backdrop-filter:blur(2px);">
+    <div style="background:#fff; width:min(520px, 95vw); border-radius:14px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,.12);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #e5e7eb;">
+            <h3 style="margin:0; font-size:18px;">輸入優惠卷代碼</h3>
+            <button type="button" id="closeRedeemCouponModal" style="border:none; background:#f3f4f6; border-radius:999px; width:32px; height:32px; cursor:pointer;">✕</button>
+        </div>
+        <form action="../backend/backend_action.php" method="POST">
+            <input type="hidden" name="action" value="redeem_coupon_code">
+            <?php echo apCsrfField(); ?>
+            <label for="redeem_coupon_code" style="display:block; font-size:14px; margin-bottom:8px; color:#444;">優惠卷代碼</label>
+            <input type="text" id="redeem_coupon_code" name="coupon_code" required style="width:100%; padding:12px 14px; border:1px solid #d1d5db; border-radius:10px; box-sizing:border-box; margin-bottom:16px;" placeholder="請輸入優惠卷代碼">
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" id="cancelRedeemCoupon" style="padding:10px 16px; border:none; border-radius:999px; background:#e5e7eb; cursor:pointer;">取消</button>
+                <button type="submit" style="padding:10px 16px; border:none; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">兌換優惠卷</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <style>
 @media (max-width: 992px) {
-    section[style*='grid-template-columns:repeat(4'] {
+    section[style*='grid-template-columns:repeat(5'] {
         grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
     section[style*='grid-template-columns:repeat(2'] {
@@ -253,5 +380,40 @@ include 'header.php';
     }
 }
 </style>
+
+<script>
+const redeemCouponModal = document.getElementById('redeemCouponModal');
+const openRedeemCoupon = document.getElementById('openRedeemCoupon');
+const closeRedeemCouponModal = document.getElementById('closeRedeemCouponModal');
+const cancelRedeemCoupon = document.getElementById('cancelRedeemCoupon');
+
+function hideRedeemCouponModal() {
+    if (redeemCouponModal) {
+        redeemCouponModal.style.display = 'none';
+    }
+}
+
+if (openRedeemCoupon && redeemCouponModal) {
+    openRedeemCoupon.addEventListener('click', () => {
+        redeemCouponModal.style.display = 'flex';
+    });
+}
+
+if (closeRedeemCouponModal) {
+    closeRedeemCouponModal.addEventListener('click', hideRedeemCouponModal);
+}
+
+if (cancelRedeemCoupon) {
+    cancelRedeemCoupon.addEventListener('click', hideRedeemCouponModal);
+}
+
+if (redeemCouponModal) {
+    redeemCouponModal.addEventListener('click', (event) => {
+        if (event.target === redeemCouponModal) {
+            hideRedeemCouponModal();
+        }
+    });
+}
+</script>
 
 <?php include 'footer.php'; $conn->close(); ?>

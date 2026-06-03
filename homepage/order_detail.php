@@ -76,7 +76,14 @@ $orderItems = [];
 
 if (odTableExists($conn, 'orders')) {
     $safeOrderNumber = $conn->real_escape_string($orderNumber);
-    $order = odFetchRow($conn, "SELECT * FROM orders WHERE order_number = '{$safeOrderNumber}' AND user_id = {$userId} LIMIT 1");
+    $orderSql = "
+        SELECT o.*, c.coupon_name, c.coupon_code
+        FROM orders o
+        LEFT JOIN coupons c ON c.coupon_id = o.coupon_id
+        WHERE o.order_number = '{$safeOrderNumber}' AND o.user_id = {$userId}
+        LIMIT 1
+    ";
+    $order = odFetchRow($conn, $orderSql);
 }
 
 if ($order && odTableExists($conn, 'order_items')) {
@@ -123,6 +130,12 @@ include 'header.php';
                 <div style="font-size:13px; color:#666; margin-bottom:6px;">應付總額</div>
                 <div style="font-size:22px; font-weight:800; color:#222;">NT$ <?php echo number_format(floatval($order['total_amount'])); ?></div>
             </div>
+            <div style="padding:16px; border-radius:12px; background:#fff; border:1px solid #eee;">
+                <div style="font-size:13px; color:#666; margin-bottom:6px;">優惠卷使用</div>
+                <div style="font-size:20px; font-weight:700; color:#222;">
+                    <?php echo !empty($order['coupon_id']) ? htmlspecialchars(($order['coupon_name'] ?? ('#' . $order['coupon_id'])) . (!empty($order['coupon_code']) ? '（' . $order['coupon_code'] . '）' : '')) : '未使用'; ?>
+                </div>
+            </div>
         </div>
 
         <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px; margin-bottom:18px; line-height:1.9; color:#444;">
@@ -132,6 +145,20 @@ include 'header.php';
             <div><strong>卡片品牌：</strong><?php echo htmlspecialchars($order['card_brand']); ?></div>
             <div><strong>卡號末 4 碼：</strong><?php echo htmlspecialchars($order['card_last4'] !== '' ? '****' . $order['card_last4'] : '-'); ?></div>
             <div><strong>下單時間：</strong><?php echo htmlspecialchars($order['created_at']); ?></div>
+        </div>
+
+        <?php
+        $discountAmount = isset($order['discount_amount']) ? (float)$order['discount_amount'] : 0.0;
+        $subtotalAmount = isset($order['subtotal_amount']) ? (float)$order['subtotal_amount'] : 0.0;
+        $shippingFee = isset($order['shipping_fee']) ? (float)$order['shipping_fee'] : 0.0;
+        $discountedTotal = isset($order['total_amount']) ? (float)$order['total_amount'] : max(0, $subtotalAmount + $shippingFee - $discountAmount);
+        ?>
+
+        <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px; margin-bottom:18px; line-height:1.9; color:#444;">
+            <div><strong>商品小計：</strong>NT$ <?php echo number_format($subtotalAmount); ?></div>
+            <div><strong>運費：</strong>NT$ <?php echo number_format($shippingFee); ?></div>
+            <div><strong>優惠折扣：</strong>NT$ <?php echo number_format($discountAmount); ?></div>
+            <div><strong>優惠後總額：</strong>NT$ <?php echo number_format($discountedTotal); ?></div>
         </div>
 
         <div style="overflow:auto; border:1px solid #eee; border-radius:14px;">
