@@ -10,6 +10,45 @@ if ($conn->connect_error) {
 }
 $conn->set_charset("utf8mb4");
 
+$adminRoleId = 2;
+$currentSupplierId = null;
+if (isset($_SESSION['admin_username'])) {
+    $roleStmt = $conn->prepare("SELECT role_id, admin_id FROM admin_users WHERE username = ? LIMIT 1");
+    $roleStmt->bind_param('s', $_SESSION['admin_username']);
+    $roleStmt->execute();
+    $roleRow = $roleStmt->get_result()->fetch_assoc();
+    if ($roleRow) {
+        $adminRoleId = intval($roleRow['role_id']);
+        if ($adminRoleId === 3) {
+            $adminId = intval($roleRow['admin_id']);
+            $supplierStmt = $conn->prepare("SELECT supplier_id FROM suppliers WHERE admin_id = ? LIMIT 1");
+            $supplierStmt->bind_param('i', $adminId);
+            $supplierStmt->execute();
+            if ($supplierRow = $supplierStmt->get_result()->fetch_assoc()) {
+                $currentSupplierId = intval($supplierRow['supplier_id']);
+            }
+            $supplierStmt->close();
+        }
+    }
+    $roleStmt->close();
+}
+
+$vendorProductWhereSql = '';
+if ($adminRoleId === 3 && $currentSupplierId !== null) {
+    $vendorProductWhereSql = ' AND p.supplier_id = ' . intval($currentSupplierId);
+}
+
+$vendorOrderWhereSql = '';
+if ($adminRoleId === 3 && $currentSupplierId !== null) {
+    $vendorOrderWhereSql = ' AND EXISTS (
+        SELECT 1
+        FROM order_items oi2
+        JOIN products p2 ON p2.product_id = oi2.product_id
+        WHERE oi2.order_id = o.order_id
+          AND p2.supplier_id = ' . intval($currentSupplierId) . '
+    )';
+}
+
 // =================【 1. 後端關鍵數據即時統計 】=================
 
 $total_sales = 0;
@@ -19,7 +58,15 @@ $low_stock_count = 0;
 $aov = 0; // 客單價
 
 // 💡 統計銷售額與總有效訂單
-$resOrders = $conn->query("SELECT SUM(total_amount) AS total, COUNT(order_id) AS cnt FROM orders WHERE status != 'CANCELLED'");
+if ($adminRoleId === 3 && $currentSupplierId !== null) {
+    $resOrders = $conn->query("SELECT SUM(oi.quantity * oi.locked_price) AS total, COUNT(DISTINCT o.order_id) AS cnt
+        FROM order_items oi
+        JOIN orders o ON oi.order_id = o.order_id
+        JOIN products p ON p.product_id = oi.product_id
+        WHERE o.status != 'CANCELLED' AND p.supplier_id = " . intval($currentSupplierId));
+} else {
+    $resOrders = $conn->query("SELECT SUM(total_amount) AS total, COUNT(order_id) AS cnt FROM orders WHERE status != 'CANCELLED'");
+}
 if ($resOrders && $row = $resOrders->fetch_assoc()) {
     $total_sales = floatval($row['total'] ?? 0);
     $order_count = intval($row['cnt'] ?? 0);
@@ -37,7 +84,7 @@ if ($resMembers && $row = $resMembers->fetch_assoc()) {
 }
 
 // 💡 統計庫存吃緊規格數 (庫存 <= 3 件)
-$resLowStockCount = $conn->query("SELECT COUNT(variant_id) AS cnt FROM product_variants WHERE stock_available <= 3");
+$resLowStockCount = $conn->query("SELECT COUNT(pv.variant_id) AS cnt FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.stock_available <= 3{$vendorProductWhereSql}");
 if ($resLowStockCount && $row = $resLowStockCount->fetch_assoc()) {
     $low_stock_count = intval($row['cnt'] ?? 0);
 }
@@ -47,7 +94,7 @@ $lowStockList = [];
 $lowStockSql = "SELECT pv.sku_code, pv.color, pv.size_inches, pv.stock_available, p.name AS product_name 
                 FROM product_variants pv 
                 JOIN products p ON pv.product_id = p.product_id 
-                WHERE pv.stock_available <= 3 
+                WHERE pv.stock_available <= 3{$vendorProductWhereSql} 
                 ORDER BY pv.stock_available ASC, p.product_id DESC LIMIT 4";
 $resLowList = $conn->query($lowStockSql);
 if ($resLowList) {
@@ -62,7 +109,8 @@ $maxQty = 1; // 用來當作 CSS 進度條的 100% 基準值
 $rankSql = "SELECT oi.product_name, SUM(oi.quantity) AS total_qty, SUM(oi.quantity * oi.locked_price) AS total_revenue
             FROM order_items oi
             JOIN orders o ON oi.order_id = o.order_id
-            WHERE o.status != 'CANCELLED'
+            JOIN products p ON p.product_id = oi.product_id
+            WHERE o.status != 'CANCELLED'" . ($adminRoleId === 3 && $currentSupplierId !== null ? ' AND p.supplier_id = ' . intval($currentSupplierId) : '') . "
             GROUP BY oi.product_name
             ORDER BY total_qty DESC LIMIT 5";
 $resRank = $conn->query($rankSql);

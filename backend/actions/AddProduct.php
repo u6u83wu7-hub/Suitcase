@@ -30,6 +30,7 @@ if (!empty($_POST['new_category_name'])) {
 $isFeatured = boolPost('is_featured') ? 1 : 0;
 $description = isset($_POST['description']) ? trim($_POST['description']) : '';
 $warrantyInfo = isset($_POST['warranty_info']) ? trim($_POST['warranty_info']) : '';
+$supplierId = isset($_POST['supplier_id']) && $_POST['supplier_id'] !== '' ? intval($_POST['supplier_id']) : null;
 $slug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name)) . '-' . time();
 
 if (empty($_POST['original_price']) || empty($_POST['member_price']) || empty($_POST['stock'])
@@ -53,6 +54,12 @@ try {
     $insertCols = ['name', 'slug', 'is_featured', 'status'];
     $insertVals = [$name, $slug, $isFeatured, 'ON SHELF'];
     $bindTypes = 'ssis';
+
+    if ($supplierId !== null && in_array('supplier_id', $productColumns, true)) {
+        $insertCols[] = 'supplier_id';
+        $insertVals[] = $supplierId;
+        $bindTypes .= 'i';
+    }
 
     if (in_array('description', $productColumns, true)) {
         $insertCols[] = 'description';

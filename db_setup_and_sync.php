@@ -1,8 +1,9 @@
 <?php
 // db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本
-// 版本 4.2 (加入優惠券系統)
+// 版本 4.1 (修復防護版)
 header("Content-Type: text/html; charset=utf-8");
 
+// 💡 新增這行：防止 PHP 8.1+ 因為一點點微小的 SQL 阻礙就整個腳本崩潰！
 mysqli_report(MYSQLI_REPORT_OFF);
 
 $host = "localhost";
@@ -20,7 +21,7 @@ $conn->query("CREATE DATABASE IF NOT EXISTS `$dbname` DEFAULT CHARACTER SET utf8
 $conn->select_db($dbname);
 
 echo "<h2>🚀 All Pass 專案 - 資料庫結構同步/初始化開始...</h2>";
-echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4.2</p>";
+echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4.1</p>";
 echo "<hr>";
 
 function columnExists($conn, $table, $column) {
@@ -56,12 +57,102 @@ $conn->query($sql_cat);
 // 📁 表格 3：供應商 (suppliers)
 $sql_sup = "CREATE TABLE IF NOT EXISTS `suppliers` (
     `supplier_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `admin_id` INT NULL UNIQUE,
     `name` VARCHAR(100) NOT NULL,
     `contact_person` VARCHAR(100) NULL,
     `phone` VARCHAR(20) NULL,
     `email` VARCHAR(100) NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_sup);
+
+if (tableExists($conn, 'suppliers') && !columnExists($conn, 'suppliers', 'admin_id')) {
+    $conn->query("ALTER TABLE `suppliers` ADD COLUMN `admin_id` INT NULL AFTER `supplier_id`");
+}
+
+// 📁 表格 3.1：廠商供應紀錄 (supplier_supplies)
+$sql_supplier_supplies = "CREATE TABLE IF NOT EXISTS `supplier_supplies` (
+    `supply_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `supplier_id` INT NOT NULL,
+    `admin_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    `variant_id` INT NULL,
+    `supply_quantity` INT NOT NULL,
+    `is_supply_complete` TINYINT(1) NOT NULL DEFAULT 0,
+    `note` VARCHAR(255) NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_supplier_supplies_supplier_id` (`supplier_id`),
+    INDEX `idx_supplier_supplies_product_id` (`product_id`),
+    INDEX `idx_supplier_supplies_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_supplier_supplies);
+
+if (tableExists($conn, 'supplier_supplies')) {
+    if (!columnExists($conn, 'supplier_supplies', 'supplier_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `supplier_id` INT NOT NULL AFTER `supply_id`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'admin_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `admin_id` INT NOT NULL AFTER `supplier_id`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'product_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `product_id` INT NOT NULL AFTER `admin_id`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'variant_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `variant_id` INT NULL AFTER `product_id`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'supply_quantity')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `supply_quantity` INT NOT NULL AFTER `product_id`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'is_supply_complete')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `is_supply_complete` TINYINT(1) NOT NULL DEFAULT 0 AFTER `supply_quantity`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'note')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `note` VARCHAR(255) NULL AFTER `is_supply_complete`");
+    }
+    if (!columnExists($conn, 'supplier_supplies', 'created_at')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `note`");
+    }
+}
+
+// 📁 表格 3.2：請求供貨表 (supply_requests)
+$sql_supply_requests = "CREATE TABLE IF NOT EXISTS `supply_requests` (
+    `request_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `admin_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    `variant_id` INT NOT NULL,
+    `requested_quantity` INT NOT NULL,
+    `note` VARCHAR(255) NULL,
+    `request_status` VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_supply_requests_admin_id` (`admin_id`),
+    INDEX `idx_supply_requests_product_id` (`product_id`),
+    INDEX `idx_supply_requests_variant_id` (`variant_id`),
+    INDEX `idx_supply_requests_status` (`request_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_supply_requests);
+
+if (tableExists($conn, 'supply_requests')) {
+    if (!columnExists($conn, 'supply_requests', 'admin_id')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `admin_id` INT NOT NULL AFTER `request_id`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'product_id')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `product_id` INT NOT NULL AFTER `admin_id`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'variant_id')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `variant_id` INT NOT NULL AFTER `product_id`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'requested_quantity')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `requested_quantity` INT NOT NULL AFTER `variant_id`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'note')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `note` VARCHAR(255) NULL AFTER `requested_quantity`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'request_status')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `request_status` VARCHAR(20) NOT NULL DEFAULT 'PENDING' AFTER `note`");
+    }
+    if (!columnExists($conn, 'supply_requests', 'created_at')) {
+        $conn->query("ALTER TABLE `supply_requests` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `request_status`");
+    }
+}
 
 // 📁 表格 4：商品主檔 (products)
 $sql_prod = "CREATE TABLE IF NOT EXISTS `products` (
@@ -145,6 +236,7 @@ $sql_users = "CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_users);
 
+// 💡 已經將「會員收藏」拉到這層，確保它一定會被建立
 // 📁 表格 8：會員收藏 (user_favorites)
 $sql_favorites = "CREATE TABLE IF NOT EXISTS `user_favorites` (
     `favorite_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -182,6 +274,20 @@ $sql_cart_items = "CREATE TABLE IF NOT EXISTS `cart_items` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_cart_items);
 
+// 修正 cart_items 欄位
+if (columnExists($conn, 'cart_items', 'cart_id')) {
+    $conn->query("ALTER TABLE `cart_items` MODIFY COLUMN `cart_id` INT NULL");
+}
+if (!columnExists($conn, 'cart_items', 'user_id')) {
+    $conn->query("ALTER TABLE `cart_items` ADD COLUMN `user_id` INT NOT NULL DEFAULT 0 AFTER `cart_id`");
+}
+if (!columnExists($conn, 'cart_items', 'product_id')) {
+    $conn->query("ALTER TABLE `cart_items` ADD COLUMN `product_id` INT NOT NULL DEFAULT 0 AFTER `user_id`");
+}
+if (columnExists($conn, 'cart_items', 'variant_id')) {
+    $conn->query("ALTER TABLE `cart_items` MODIFY COLUMN `variant_id` INT NULL");
+}
+
 $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `order_id` INT AUTO_INCREMENT PRIMARY KEY,
     `order_number` VARCHAR(50) NULL,
@@ -208,55 +314,38 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_orders);
 
-// =====================================
-// 📁 表格 9：優惠券系統全套建立 (包含升級版)
-// =====================================
-$sql_coupons = "CREATE TABLE IF NOT EXISTS `coupons` (
-    `coupon_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `coupon_name` VARCHAR(100) NOT NULL,
-    `coupon_code` VARCHAR(50) NULL UNIQUE,
-    `coupon_type` ENUM('DISCOUNT', 'REDUCE', 'POINTS') NOT NULL DEFAULT 'DISCOUNT',
-    `coupon_value` DECIMAL(10,2) NOT NULL,
-    `min_order_amount` DECIMAL(10,2) NULL DEFAULT 0,
-    `target_membership` VARCHAR(50) NULL,
-    `usage_limit` INT NULL DEFAULT 0,
-    `used_count` INT NOT NULL DEFAULT 0,
-    `start_at` DATETIME NULL,
-    `end_at` DATETIME NULL,
-    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-$conn->query($sql_coupons);
-
-// 💡 動態補足 target_membership 欄位 (防呆)
-if (!columnExists($conn, 'coupons', 'target_membership')) {
-    $conn->query("ALTER TABLE `coupons` ADD COLUMN `target_membership` VARCHAR(50) NULL AFTER `min_order_amount`");
+$statusColRes = $conn->query("SHOW COLUMNS FROM `orders` LIKE 'status'");
+if ($statusColRes && $statusColRes->num_rows > 0) {
+    $statusCol = $statusColRes->fetch_assoc();
+    $statusType = strtolower((string)$statusCol['Type']);
+    if (strpos($statusType, 'enum') === false) {
+        $conn->query("ALTER TABLE `orders` MODIFY COLUMN `status` ENUM('PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'PENDING'");
+    }
+    $conn->query("UPDATE `orders` SET `status` = 'PROCESSING' WHERE `status` = 'PAID'");
+    $conn->query("UPDATE `orders` SET `status` = 'SHIPPED' WHERE `status` = 'SHIPPING'");
 }
 
-$sql_distributions = "CREATE TABLE IF NOT EXISTS `coupon_distributions` (
-    `distribution_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `coupon_id` INT NOT NULL,
-    `target_type` VARCHAR(20) NOT NULL DEFAULT 'SINGLE',
-    `user_id` INT NULL,
-    `sent_by_admin_id` INT NULL,
-    `quantity` INT NOT NULL DEFAULT 1,
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-$conn->query($sql_distributions);
-
-$sql_uses = "CREATE TABLE IF NOT EXISTS `coupon_code_uses` (
-    `coupon_code_use_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `coupon_id` INT NOT NULL,
-    `user_id` INT NOT NULL,
-    `coupon_code` VARCHAR(50) NULL,
-    `used_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-$conn->query($sql_uses);
-
-if (!columnExists($conn, 'orders', 'coupon_id')) {
-    $conn->query("ALTER TABLE `orders` ADD COLUMN `coupon_id` INT NULL AFTER `user_id`");
+if (!columnExists($conn, 'orders', 'order_number')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `order_number` VARCHAR(50) NULL AFTER `order_id`");
 }
-
+if (!columnExists($conn, 'orders', 'cardholder_name')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `cardholder_name` VARCHAR(100) NULL AFTER `payment_method`");
+}
+if (!columnExists($conn, 'orders', 'card_brand')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_brand` VARCHAR(30) NULL AFTER `cardholder_name`");
+}
+if (!columnExists($conn, 'orders', 'card_last4')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_last4` VARCHAR(4) NULL AFTER `card_brand`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_month')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_month` VARCHAR(2) NULL AFTER `card_last4`");
+}
+if (!columnExists($conn, 'orders', 'card_expiry_year')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `card_expiry_year` VARCHAR(4) NULL AFTER `card_expiry_month`");
+}
+if (!columnExists($conn, 'orders', 'inventory_deducted')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `inventory_deducted` TINYINT(1) NOT NULL DEFAULT 0 AFTER `card_expiry_year`");
+}
 
 $sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
     `order_item_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -273,6 +362,22 @@ $sql_order_items = "CREATE TABLE IF NOT EXISTS `order_items` (
     INDEX `idx_order_items_variant_id` (`variant_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_order_items);
+
+if (columnExists($conn, 'order_items', 'variant_id')) {
+    $conn->query("ALTER TABLE `order_items` MODIFY COLUMN `variant_id` INT NOT NULL");
+}
+if (!columnExists($conn, 'order_items', 'sku_code')) {
+    $conn->query("ALTER TABLE `order_items` ADD COLUMN `sku_code` VARCHAR(50) NOT NULL AFTER `product_name`");
+}
+if (!columnExists($conn, 'order_items', 'color')) {
+    $conn->query("ALTER TABLE `order_items` ADD COLUMN `color` VARCHAR(50) NULL AFTER `sku_code`");
+}
+if (!columnExists($conn, 'order_items', 'size_inches')) {
+    $conn->query("ALTER TABLE `order_items` ADD COLUMN `size_inches` VARCHAR(50) NULL AFTER `color`");
+}
+if (!columnExists($conn, 'order_items', 'locked_price')) {
+    $conn->query("ALTER TABLE `order_items` ADD COLUMN `locked_price` DECIMAL(10,2) NOT NULL AFTER `size_inches`");
+}
 
 $sql_customer_tickets = "CREATE TABLE IF NOT EXISTS `customer_tickets` (
     `ticket_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -301,7 +406,175 @@ $sql_ticket_messages = "CREATE TABLE IF NOT EXISTS `ticket_messages` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_ticket_messages);
 
-echo "<p style='color:blue;'>📋 優惠券系統、基本資料表與相關防呆擴充已建立完成。</p>";
+if (!columnExists($conn, 'ticket_messages', 'product_id')) {
+    $conn->query("ALTER TABLE `ticket_messages` ADD COLUMN `product_id` INT NULL AFTER `sender_id`");
+}
+
+$sql_product_qa = "CREATE TABLE IF NOT EXISTS `product_qa` (
+    `qa_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `product_id` INT NULL,
+    `question` TEXT NOT NULL,
+    `answer` TEXT NOT NULL,
+    `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_product_qa_product_id` (`product_id`),
+    INDEX `idx_product_qa_type` (`qa_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_product_qa);
+
+if (!columnExists($conn, 'product_qa', 'product_id')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `product_id` INT NULL AFTER `qa_id`");
+}
+if (!columnExists($conn, 'product_qa', 'question')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `question` TEXT NOT NULL AFTER `product_id`");
+}
+if (!columnExists($conn, 'product_qa', 'answer')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `answer` TEXT NOT NULL AFTER `question`");
+}
+if (!columnExists($conn, 'product_qa', 'qa_type')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT' AFTER `answer`");
+}
+
+$sql_user_notifications = "CREATE TABLE IF NOT EXISTS `user_notifications` (
+    `notification_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `title` VARCHAR(120) NOT NULL,
+    `message` TEXT NOT NULL,
+    `is_read` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_user_notifications_user_id` (`user_id`),
+    INDEX `idx_user_notifications_is_read` (`is_read`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_user_notifications);
+
+$sql_member_details = "CREATE TABLE IF NOT EXISTS `user_member_details` (
+    `member_detail_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL UNIQUE,
+    `full_address` VARCHAR(255) NULL,
+    `address_note` VARCHAR(255) NULL,
+    `cardholder_name` VARCHAR(100) NULL,
+    `card_last4` VARCHAR(4) NULL,
+    `card_brand` VARCHAR(30) NULL,
+    `expiry_month` VARCHAR(2) NULL,
+    `expiry_year` VARCHAR(4) NULL,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_member_details);
+
+$sql_promotions = "CREATE TABLE IF NOT EXISTS `promotions` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(120) NOT NULL,
+    `promotion_image_url` VARCHAR(255) NULL,
+    `description` TEXT NULL,
+    `discount_type` ENUM('PERCENT', 'AMOUNT') NOT NULL,
+    `discount_value` DECIMAL(10,2) NOT NULL,
+    `start_at` DATETIME NOT NULL,
+    `end_at` DATETIME NOT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_promotions);
+
+$sql_promotion_products = "CREATE TABLE IF NOT EXISTS `promotion_products` (
+    `promotion_id` INT NOT NULL,
+    `product_id` INT NOT NULL,
+    PRIMARY KEY (`promotion_id`, `product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_promotion_products);
+
+$sql_promotion_banners = "CREATE TABLE IF NOT EXISTS `promotion_banners` (
+    `promotion_id` INT NOT NULL,
+    `banner_image_url` VARCHAR(255) NOT NULL,
+    `is_show_on_homepage` TINYINT(1) NOT NULL DEFAULT 1,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`promotion_id`, `banner_image_url`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_promotion_banners);
+
+echo "<p style='color:blue;'>📋 基本資料表與會員收藏表結構已確認/建立完成。</p>";
+
+// === 延伸欄位同步檢查 ===
+
+if (!columnExists($conn, 'product_images', 'color')) {
+    $conn->query("ALTER TABLE `product_images` ADD COLUMN `color` VARCHAR(50) NULL AFTER `is_main`");
+}
+
+if (!columnExists($conn, 'product_images', 'sort_order')) {
+    $afterColumn = columnExists($conn, 'product_images', 'display_order') ? 'display_order' : 'is_main';
+    $conn->query("ALTER TABLE `product_images` ADD COLUMN `sort_order` INT NOT NULL DEFAULT 0 AFTER `{$afterColumn}`");
+}
+
+if (columnExists($conn, 'product_images', 'display_order') && columnExists($conn, 'product_images', 'sort_order')) {
+    $conn->query("UPDATE `product_images` SET `sort_order` = `display_order` WHERE (`sort_order` = 0 OR `sort_order` IS NULL) AND `display_order` IS NOT NULL");
+}
+
+if (!columnExists($conn, 'products', 'description')) {
+    $conn->query("ALTER TABLE `products` ADD COLUMN `description` TEXT NULL AFTER `name`");
+}
+
+if (!columnExists($conn, 'products', 'warranty_info')) {
+    $conn->query("ALTER TABLE `products` ADD COLUMN `warranty_info` TEXT NULL AFTER `description`");
+}
+
+if (!columnExists($conn, 'promotions', 'promotion_image_url')) {
+    $conn->query("ALTER TABLE `promotions` ADD COLUMN `promotion_image_url` VARCHAR(255) NULL AFTER `name`");
+}
+
+if (!columnExists($conn, 'orders', 'tracking_number')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `tracking_number` VARCHAR(100) NULL AFTER `payment_method`");
+}
+
+if (!columnExists($conn, 'orders', 'admin_notes')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `admin_notes` TEXT NULL AFTER `tracking_number`");
+}
+
+$sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
+    `product_id` INT NOT NULL,
+    `category_id` INT NOT NULL,
+    PRIMARY KEY (`product_id`, `category_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_links);
+
+// 防呆 B
+if (columnExists($conn, 'product_variants', 'size')) {
+    $conn->query("ALTER TABLE `product_variants` DROP COLUMN `size`");
+}
+
+// 防呆 C
+if (!columnExists($conn, 'product_variants', 'original_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `capacity_liters`");
+}
+if (!columnExists($conn, 'product_variants', 'special_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `special_price` DECIMAL(10,2) NULL AFTER `original_price`");
+}
+if (!columnExists($conn, 'product_variants', 'member_price')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `member_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `special_price`");
+}
+if (columnExists($conn, 'product_variants', 'price')) {
+    $conn->query("UPDATE `product_variants` SET `original_price` = `price`, `member_price` = `price` WHERE `original_price` = 0.00 AND `member_price` = 0.00");
+    $conn->query("ALTER TABLE `product_variants` DROP COLUMN `price`");
+}
+
+// 防呆 D
+$checkSizeCol = $conn->query("SHOW COLUMNS FROM `product_variants` LIKE 'size_inches'");
+if ($checkSizeCol && $checkSizeCol->num_rows > 0) {
+    $colData = $checkSizeCol->fetch_assoc();
+    if (stripos($colData['Type'], 'varchar') === false) {
+        $conn->query("ALTER TABLE `product_variants` MODIFY COLUMN `size_inches` VARCHAR(50) NULL");
+    }
+}
+
+// 防呆 E：把舊的 primary_category_id 同步進多分類關聯表 (加上錯誤檢查保護)
+if (columnExists($conn, 'products', 'primary_category_id')) {
+    $sqlSync = "INSERT IGNORE INTO product_category_links (product_id, category_id)
+                SELECT product_id, primary_category_id
+                FROM products
+                WHERE primary_category_id IS NOT NULL";
+    $conn->query($sqlSync);
+    
+    // 如果這裡執行失敗，上面的 mysqli_report_off 會讓它默默跳過，不會讓整個網頁當機
+    $conn->query("ALTER TABLE `products` DROP COLUMN `primary_category_id`");
+}
 
 // === 預填初始資料 ===
 $checkAdmin = $conn->query("SELECT * FROM admin_users WHERE username = 'admin'");
@@ -310,6 +583,14 @@ if ($checkAdmin && $checkAdmin->num_rows == 0) {
                        VALUES (1, 1, 'admin', '\$2y\$10\$HkeuM6SN3hE33bcDF.7F6.egnEarVJU25j7tWDbn7CvFjPQxFUdRO', 'ACTIVE', '2026-05-10 08:22:29')";
     $conn->query($sql_init_admin);
     echo "<p style='color:green;'>👤 已預填預設管理員帳號 (admin)</p>";
+}
+
+$checkUser = $conn->query("SELECT * FROM users WHERE email = 'Test@gmail.com'");
+if ($checkUser && $checkUser->num_rows == 0) {
+    $sql_init_user = "INSERT INTO `users` (`user_id`, `email`, `password_hash`, `name`, `phone`, `status`) 
+                      VALUES (1, 'Test@gmail.com', '\$2y\$10\$39ckM/FZNDUoq42XP7/9H.hh1l3yeF7xfRbct6NV497c./oaQZWP', 'Test', '0987654321', 'ACTIVE')";
+    $conn->query($sql_init_user);
+    echo "<p style='color:green;'>👥 已預填預設測試會員帳號 (Test@gmail.com)</p>";
 }
 
 echo "<hr>";

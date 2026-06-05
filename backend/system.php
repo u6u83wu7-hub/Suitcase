@@ -33,28 +33,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_action'])) {
             $new_user = trim($_POST['username'] ?? '');
             $new_pass = $_POST['password'] ?? '';
             $new_role = intval($_POST['role_id'] ?? 2);
+            $supplier_name = trim($_POST['supplier_name'] ?? '');
+            $contact_person = trim($_POST['contact_person'] ?? '');
+            $phone = trim($_POST['phone'] ?? '');
+            $email = trim($_POST['email'] ?? '');
 
             if ($new_user === '' || $new_pass === '') {
                 $msg = '帳號或密碼欄位不可留白！'; $msg_type = 'error';
+            } elseif ($new_role === 3 && $supplier_name === '') {
+                $msg = '選擇廠商角色時，請輸入廠商名稱！'; $msg_type = 'error';
             } else {
-                // 檢查帳號是否重複
-                $stmt = $conn->prepare("SELECT admin_id FROM admin_users WHERE username = ? LIMIT 1");
-                $stmt->bind_param("s", $new_user); $stmt->execute();
-                if ($stmt->get_result()->num_rows > 0) {
-                    $msg = '建立失敗：此管理員帳號已存在！'; $msg_type = 'error';
-                } else {
+                $conn->begin_transaction();
+                try {
+                    // 檢查帳號是否重複
+                    $stmt = $conn->prepare("SELECT admin_id FROM admin_users WHERE username = ? LIMIT 1");
+                    $stmt->bind_param("s", $new_user);
+                    $stmt->execute();
+                    if ($stmt->get_result()->num_rows > 0) {
+                        throw new Exception('建立失敗：此管理員帳號已存在！');
+                    }
+                    $stmt->close();
+
                     // 💡 安全核心：使用 BCRYPT 雜湊法對新密碼加密
                     $hash = password_hash($new_pass, PASSWORD_BCRYPT);
                     $ins = $conn->prepare("INSERT INTO admin_users (role_id, username, password_hash, status) VALUES (?, ?, ?, 'ACTIVE')");
                     $ins->bind_param("iss", $new_role, $new_user, $hash);
-                    if ($ins->execute()) {
-                        $msg = '成功建立全新管理員帳號：' . htmlspecialchars($new_user);
-                    } else {
-                        $msg = '資料庫寫入異常。'; $msg_type = 'error';
+                    if (!$ins->execute()) {
+                        throw new Exception('資料庫寫入異常。');
                     }
+                    $adminId = $conn->insert_id;
                     $ins->close();
+
+                    if ($new_role === 3) {
+                        $supplierStmt = $conn->prepare("INSERT INTO suppliers (admin_id, name, contact_person, phone, email) VALUES (?, ?, ?, ?, ?)");
+                        $supplierStmt->bind_param("issss", $adminId, $supplier_name, $contact_person, $phone, $email);
+                        if (!$supplierStmt->execute()) {
+                            throw new Exception('廠商資料寫入失敗。');
+                        }
+                        $supplierStmt->close();
+                    }
+
+                    $conn->commit();
+                    $msg = $new_role === 3
+                        ? '成功建立廠商帳號並寫入廠商資料：' . htmlspecialchars($new_user)
+                        : '成功建立全新管理員帳號：' . htmlspecialchars($new_user);
+                } catch (Exception $e) {
+                    $conn->rollback();
+                    $msg = $e->getMessage();
+                    $msg_type = 'error';
                 }
-                $stmt->close();
             }
         }
         
@@ -143,6 +170,8 @@ if ($res) {
                         <td>
                             <?php if (intval($ad['role_id']) === 1): ?>
                                 <span class="badge super">👑 超級管理者</span>
+                            <?php elseif (intval($ad['role_id']) === 3): ?>
+                                <span class="badge cs">🏪 廠商</span>
                             <?php else: ?>
                                 <span class="badge cs">💬 客服專員</span>
                             <?php endif; ?>
@@ -162,6 +191,7 @@ if ($res) {
                                 <select name="role_id">
                                     <option value="1" <?php echo intval($ad['role_id'])==1 ? 'selected':''; ?>>超級管理者</option>
                                     <option value="2" <?php echo intval($ad['role_id'])==2 ? 'selected':''; ?>>客服專員</option>
+                                    <option value="3" <?php echo intval($ad['role_id'])==3 ? 'selected':''; ?>>廠商</option>
                                 </select>
 
                                 <select name="status">
@@ -190,12 +220,45 @@ if ($res) {
             <input type="password" name="password" placeholder="輸入強固密碼組合" required>
 
             <label style="font-size:13px; font-weight:700; color:#475569;">初始指派權限群組</label>
-            <select name="role_id">
+            <select name="role_id" id="createAdminRoleId">
                 <option value="2" selected>💬 客服專員 (受限角色)</option>
+                <option value="3">🏪 廠商 (受限角色)</option>
                 <option value="1">👑 超級管理者 (完整控制)</option>
             </select>
+
+            <div id="supplierFields" style="display:none; margin-top:12px; padding:12px; border:1px dashed #cbd5e1; border-radius:10px; background:#fff;">
+                <div style="font-size:13px; font-weight:800; color:#334155; margin-bottom:8px;">廠商資訊（選擇廠商角色時填寫）</div>
+                <label style="font-size:13px; font-weight:700; color:#475569;">廠商名稱</label>
+                <input type="text" name="supplier_name" placeholder="例如：宏遠旅行箱有限公司" autocomplete="off">
+
+                <label style="font-size:13px; font-weight:700; color:#475569;">聯絡人</label>
+                <input type="text" name="contact_person" placeholder="例如：王小姐" autocomplete="off">
+
+                <label style="font-size:13px; font-weight:700; color:#475569;">電話</label>
+                <input type="text" name="phone" placeholder="例如：02-1234-5678" autocomplete="off">
+
+                <label style="font-size:13px; font-weight:700; color:#475569;">Email</label>
+                <input type="email" name="email" placeholder="example@company.com" autocomplete="off">
+            </div>
 
             <button type="submit" class="alt" style="width:100%; margin-top:8px;">確認配置並發送帳號</button>
         </form>
     </div>
 </div>
+
+<script>
+(function () {
+    const roleSelect = document.getElementById('createAdminRoleId');
+    const supplierFields = document.getElementById('supplierFields');
+    if (!roleSelect || !supplierFields) {
+        return;
+    }
+
+    function toggleSupplierFields() {
+        supplierFields.style.display = roleSelect.value === '3' ? 'block' : 'none';
+    }
+
+    roleSelect.addEventListener('change', toggleSupplierFields);
+    toggleSupplierFields();
+})();
+</script>

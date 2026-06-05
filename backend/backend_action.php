@@ -23,7 +23,18 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     exit();
 }
 
-apRequireCsrf('backend.php?page=products');
+ $requestedAction = isset($_POST['action']) ? trim($_POST['action']) : 'unknown';
+// 設定針對特定 action 的 CSRF 返回頁
+$csrfReturnPage = 'backend.php?page=products';
+if ($requestedAction === 'submit_supplier_supply') {
+    $csrfReturnPage = 'backend.php?page=supplier_products';
+} elseif ($requestedAction === 'complete_supplier_supply') {
+    $csrfReturnPage = 'backend.php?page=supplier_supplies';
+} elseif ($requestedAction === 'submit_supply_request') {
+    $csrfReturnPage = 'backend.php?page=request_supply';
+}
+
+apRequireCsrf($csrfReturnPage);
 
 // 辅助函数
 function goProducts($message = '') {
@@ -61,6 +72,27 @@ function goCoupon($message = '') {
     exit();
 }
 
+function goSupplierProducts($message = '') {
+    $params = ['page' => 'supplier_products'];
+    if ($message !== '') {
+        $params['message'] = $message;
+    }
+    header('Location: backend.php?' . http_build_query($params));
+    exit();
+}
+
+function goRequestSupply($message = '', $productId = 0) {
+    $params = ['page' => 'request_supply'];
+    if ($message !== '') {
+        $params['message'] = $message;
+    }
+    if ($productId > 0) {
+        $params['product_id'] = $productId;
+    }
+    header('Location: backend.php?' . http_build_query($params));
+    exit();
+}
+
 function tableColumns($conn, $tableName) {
     $columns = [];
     $tableName = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -78,7 +110,7 @@ function boolPost($key) {
 }
 
 // 获取 action 和必要的列信息
-$action = isset($_POST['action']) ? trim($_POST['action']) : 'unknown';
+$action = $requestedAction;
 $productColumns = tableColumns($conn, 'products');
 $variantColumns = tableColumns($conn, 'product_variants');
 $imageColumns = tableColumns($conn, 'product_images');
@@ -111,6 +143,9 @@ $actions = [
     'remove_product_from_category' => 'actions/CategoryActions.php', // 👈 新增這行
     'reply_ticket_message' => 'actions/CustomerServiceActions.php',
     'add_product_qa' => 'actions/CustomerServiceActions.php',
+    'submit_supplier_supply' => 'actions/SubmitSupplierSupply.php',
+    'complete_supplier_supply' => 'actions/CompleteSupplierSupply.php',
+    'submit_supply_request' => 'actions/SubmitSupplyRequest.php',
 ];
 
 // 分发请求

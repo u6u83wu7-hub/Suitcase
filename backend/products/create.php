@@ -30,6 +30,15 @@ require_once __DIR__ . '/../auth_guard.php';
                     </div>
                     <input type="text" class="pm-input" name="new_category_name" style="margin-top:8px;" placeholder="新增分類名稱（選填）">
                 </div>
+                <div class="pm-col-3">
+                    <label>廠商名稱（選填）</label>
+                    <select class="pm-select" name="supplier_id">
+                        <option value="">不指定廠商</option>
+                        <?php foreach ($suppliers as $supplier): ?>
+                            <option value="<?php echo intval($supplier['supplier_id']); ?>"><?php echo htmlspecialchars($supplier['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div class="pm-col-3" style="display:flex; align-items:center; padding-bottom:8px;">
                     <label style="margin:0; cursor:pointer; display:flex; align-items:center; gap:6px;">
                         <input type="checkbox" name="is_featured" value="1" style="width:16px; height:16px;">

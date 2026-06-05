@@ -1,8 +1,7 @@
 <?php
 require_once __DIR__ . '/auth_guard.php';
 // products.php - 商品管理主頁面（容器）
-// $conn 由 backend.php 提供
-//版本1
+
 function pmTableColumns($conn, $tableName) {
     $cols = [];
     $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -15,32 +14,40 @@ function pmTableColumns($conn, $tableName) {
     return $cols;
 }
 
-// ===== 數據初始化 =====
-
-// 分頁設定
 $perPage = 10;
 $currentPage = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
 $offset = ($currentPage - 1) * $perPage;
 
-// 取得篩選條件
 $keyword = isset($_GET['keyword']) ? trim($_GET['keyword']) : '';
 $categoryFilter = isset($_GET['category_filter']) ? trim($_GET['category_filter']) : '';
+$supplierFilter = isset($_GET['supplier_filter']) ? trim($_GET['supplier_filter']) : '';
 $statusFilter = isset($_GET['status_filter']) ? trim($_GET['status_filter']) : '';
 $featuredFilter = isset($_GET['featured_filter']) ? trim($_GET['featured_filter']) : '';
 $stockFilter = isset($_GET['stock_filter']) ? trim($_GET['stock_filter']) : '';
 $lowStockThreshold = 5;
 
-// 取得分類列表
+$productCols = pmTableColumns($conn, 'products');
+$imageCols = pmTableColumns($conn, 'product_images');
+
 $categories = [];
-$categorySql = "SELECT category_id, name FROM categories ORDER BY name ASC";
-$categoryResult = $conn->query($categorySql);
+$categoryResult = $conn->query("SELECT category_id, name FROM categories ORDER BY name ASC");
 if ($categoryResult) {
     while ($cat = $categoryResult->fetch_assoc()) {
         $categories[] = $cat;
     }
 }
 
-// 構建 WHERE 條件
+$suppliers = [];
+$supplierResult = $conn->query("SELECT supplier_id, name FROM suppliers ORDER BY name ASC");
+if ($supplierResult) {
+    while ($supplier = $supplierResult->fetch_assoc()) {
+        $suppliers[] = $supplier;
+    }
+}
+
+$isVendorAccount = isset($admin_role_id) && intval($admin_role_id) === 3;
+$vendorSupplierId = $isVendorAccount ? intval($current_supplier_id ?? 0) : 0;
+
 $conditions = [];
 if ($keyword !== '') {
     $safeKeyword = $conn->real_escape_string($keyword);
@@ -52,6 +59,16 @@ if ($categoryFilter !== '') {
     } else {
         $conditions[] = "EXISTS (SELECT 1 FROM product_category_links pcl WHERE pcl.product_id = p.product_id AND pcl.category_id = " . intval($categoryFilter) . ")";
     }
+}
+if ($supplierFilter !== '' && in_array('supplier_id', $productCols, true)) {
+    if ($supplierFilter === 'none') {
+        $conditions[] = 'p.supplier_id IS NULL';
+    } else {
+        $conditions[] = 'p.supplier_id = ' . intval($supplierFilter);
+    }
+}
+if ($isVendorAccount && $vendorSupplierId > 0 && in_array('supplier_id', $productCols, true)) {
+    $conditions[] = 'p.supplier_id = ' . $vendorSupplierId;
 }
 if ($statusFilter !== '') {
     $safeStatus = $conn->real_escape_string($statusFilter);
@@ -77,19 +94,9 @@ if ($stockFilter === 'low') {
     )";
 }
 
-$whereClause = '';
-if (!empty($conditions)) {
-    $whereClause = 'WHERE ' . implode(' AND ', $conditions);
-}
+$whereClause = empty($conditions) ? '' : 'WHERE ' . implode(' AND ', $conditions);
 
-// 取得表字段
-$productCols = pmTableColumns($conn, 'products');
-$imageCols = pmTableColumns($conn, 'product_images');
-
-// 排序設定
-$productOrderBy = in_array('created_at', $productCols, true)
-    ? 'p.created_at DESC'
-    : 'p.product_id DESC';
+$productOrderBy = in_array('created_at', $productCols, true) ? 'p.created_at DESC' : 'p.product_id DESC';
 
 $imageOrderParts = [];
 if (in_array('is_main', $imageCols, true)) {
@@ -108,17 +115,16 @@ if (empty($imageOrderParts)) {
 }
 $imageOrderBy = implode(', ', $imageOrderParts);
 
-// 計算總數和分頁
 $countSql = "SELECT COUNT(*) AS total FROM products p {$whereClause}";
 $countResult = $conn->query($countSql);
 $totalProducts = ($countResult && $countResult->num_rows > 0) ? intval($countResult->fetch_assoc()['total']) : 0;
 $totalPages = max(1, ceil($totalProducts / $perPage));
 
-// 查詢商品列表
 $productSql = "
     SELECT
         p.product_id,
         p.name,
+        MAX(s.name) AS supplier_name,
         p.status,
         p.is_featured,
         COUNT(v.variant_id) AS sku_count,
@@ -137,6 +143,7 @@ $productSql = "
             LIMIT 1
         ) AS main_image
     FROM products p
+    LEFT JOIN suppliers s ON s.supplier_id = p.supplier_id
     LEFT JOIN product_variants v ON v.product_id = p.product_id
     LEFT JOIN product_category_links pcl ON pcl.product_id = p.product_id
     LEFT JOIN categories c ON c.category_id = pcl.category_id
@@ -151,38 +158,37 @@ $productQueryError = $productResult ? '' : $conn->error;
 function buildFilterQuery(array $overrides = []) {
     $base = [
         'page' => 'products',
-        'keyword' => isset($_GET['keyword']) ? $_GET['keyword'] : '',
-        'category_filter' => isset($_GET['category_filter']) ? $_GET['category_filter'] : '',
-        'status_filter' => isset($_GET['status_filter']) ? $_GET['status_filter'] : '',
-        'featured_filter' => isset($_GET['featured_filter']) ? $_GET['featured_filter'] : '',
-        'stock_filter' => isset($_GET['stock_filter']) ? $_GET['stock_filter'] : '',
-        'p' => isset($_GET['p']) ? $_GET['p'] : 1,
+        'keyword' => $_GET['keyword'] ?? '',
+        'category_filter' => $_GET['category_filter'] ?? '',
+        'supplier_filter' => $_GET['supplier_filter'] ?? '',
+        'status_filter' => $_GET['status_filter'] ?? '',
+        'featured_filter' => $_GET['featured_filter'] ?? '',
+        'stock_filter' => $_GET['stock_filter'] ?? '',
+        'p' => $_GET['p'] ?? 1,
     ];
 
-    // 💡 新增：如果切換分頁或點擊篩選時，自動清除編輯模式的參數，防止卡在編輯頁面
     if (isset($_GET['action']) && $_GET['action'] === 'edit') {
         unset($base['action'], $base['id']);
     }
 
-    $merged = array_merge($base, $overrides);
-    return 'backend.php?' . http_build_query($merged);
+    return 'backend.php?' . http_build_query(array_merge($base, $overrides));
 }
 
-// 💡 核心邏輯：判斷目前是不是編輯模式 (網址包含 action=edit 且有商品 ID)
-$isEditMode = (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id']) && intval($_GET['id']) > 0);
-
+$isEditMode = (!$isVendorAccount && isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id']) && intval($_GET['id']) > 0);
 ?>
 <link rel="stylesheet" href="../css/products.css">
 
 <div class="pm-wrap">
     <div class="pm-head">
         <div>
-            <h1 class="pm-title">商品管理</h1>
+            <h1 class="pm-title"><?php echo $isVendorAccount ? '商品瀏覽' : '商品管理'; ?></h1>
             <p class="pm-sub"></p>
         </div>
         <div class="pm-tabs">
             <?php if ($isEditMode): ?>
-                <a href="backend.php?page=products" class="pm-tab active" style="text-decoration: none;">⬅️ 返回商品列表</a>
+                <a href="backend.php?page=products" class="pm-tab active" style="text-decoration:none;">⬅️ 返回商品列表</a>
+            <?php elseif ($isVendorAccount): ?>
+                <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
             <?php else: ?>
                 <button type="button" class="pm-tab active" data-tab="list">商品列表</button>
                 <button type="button" class="pm-tab" data-tab="create">+ 新增商品</button>
@@ -190,15 +196,14 @@ $isEditMode = (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_G
         </div>
     </div>
 
-    <?php 
-    // 💡 智慧切換頁面內容
+    <?php
     if ($isEditMode) {
-        // 進入編輯模式：載入剛剛新增的 edit_product.php
-        require __DIR__ . '/products/edit_product.php'; 
+        require __DIR__ . '/products/edit_product.php';
     } else {
-        // 正常模式：載入原本的列表與新增區塊
-        require __DIR__ . '/products/list.php'; 
-        require __DIR__ . '/products/create.php'; 
+        require __DIR__ . '/products/list.php';
+        if (!$isVendorAccount) {
+            require __DIR__ . '/products/create.php';
+        }
     }
     ?>
 </div>
