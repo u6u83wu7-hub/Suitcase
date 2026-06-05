@@ -52,13 +52,23 @@ if ($admin_role_id === 3 && $page === 'profile') {
 }
 
 // 💡 核心修正 1：網址列強力攔截（白名單機制）
-// 非超級管理員依角色限制可存取頁面
+// 依角色限制可存取頁面：
+//  - 廠商 (3): dashboard, products, supplier_products
+//  - 客服 (2): 只允許 customer_service
+//  - 超級管理員 (1): 無限制
 if ($admin_role_id === 3) {
     $vendor_allowed_pages = ['dashboard', 'products', 'supplier_products'];
     if (!in_array($page, $vendor_allowed_pages, true)) {
         $page = 'dashboard';
     }
+} elseif ($admin_role_id === 2) {
+    // 客服角色僅能看到客服管理頁面
+    $cs_allowed_pages = ['customer_service'];
+    if (!in_array($page, $cs_allowed_pages, true)) {
+        $page = 'customer_service';
+    }
 } elseif ($admin_role_id !== 1) {
+    // 其他非超級管理員的預設較寬鬆白名單（保留舊行為）
     $cs_allowed_pages = ['customer_service', 'profile', 'coupon'];
     if (!in_array($page, $cs_allowed_pages, true)) {
         $page = 'profile';
@@ -163,7 +173,7 @@ if ($admin_role_id === 3) {
                 <li><a href="backend.php?page=dashboard" class="<?php echo $page=='dashboard' ? 'active' : ''; ?>"><span class="text">營運儀表板</span></a></li>
                 <li><a href="backend.php?page=products" class="<?php echo $page=='products' ? 'active' : ''; ?>"><span class="text">商品瀏覽</span></a></li>
                 <li><a href="backend.php?page=supplier_products" class="<?php echo $page=='supplier_products' ? 'active' : ''; ?>"><span class="text">供應商品</span></a></li>
-            <?php elseif ($admin_role_id === 1): ?>
+                <?php elseif ($admin_role_id === 1): ?>
                 <li><a href="backend.php?page=dashboard" class="<?php echo $page=='dashboard' ? 'active' : ''; ?>"><span class="text">營運儀表板</span></a></li>
                 <li><a href="backend.php?page=products" class="<?php echo $page=='products' ? 'active' : ''; ?>"><span class="text">商品管理</span></a></li>
                 <li><a href="backend.php?page=supplier_supplies" class="<?php echo $page=='supplier_supplies' ? 'active' : ''; ?>"><span class="text">供應表單</span></a></li>
@@ -175,6 +185,8 @@ if ($admin_role_id === 3) {
                 <li><a href="backend.php?page=marketing" class="<?php echo $page=='marketing' ? 'active' : ''; ?>"><span class="text">行銷內容管理</span></a></li>
                 <li><a href="backend.php?page=system" class="<?php echo $page=='system' ? 'active' : ''; ?>"><span class="text">系統權限管理</span></a></li>
                 <li style="margin-top:20px;"><a href="backend.php?page=profile" class="<?php echo $page=='profile' ? 'active' : ''; ?>"><span class="text">管理者資料</span></a></li>
+            <?php elseif ($admin_role_id === 2): ?>
+                <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>"><span class="text">客服管理</span></a></li>
             <?php else: ?>
                 <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>"><span class="text">客服管理</span></a></li>
                 <li><a href="backend.php?page=coupon" class="<?php echo $page=='coupon' ? 'active' : ''; ?>"><span class="text">優惠卷管理</span></a></li>
