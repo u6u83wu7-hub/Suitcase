@@ -4,10 +4,22 @@
 require_once __DIR__ . '/auth_guard.php';
 
 $selectedOrderId = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
-$allowedStatuses = ['PENDING', 'PAID', 'SHIPPING', 'COMPLETED', 'CANCELLED'];
+$allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
 
 function h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function orderStatusLabel($status) {
+    $labels = [
+        'PENDING' => '待處理',
+        'PROCESSING' => '處理中',
+        'SHIPPED' => '已出貨',
+        'DELIVERED' => '已送達',
+        'COMPLETED' => '已完成',
+        'CANCELLED' => '已取消',
+    ];
+    return $labels[$status] ?? $status;
 }
 
 function buildFilterQuery(array $overrides = []) {
@@ -125,8 +137,9 @@ if ($orderResult) {
     .om-kv dt { color: #64748b; }
     .om-kv dd { margin: 0; font-weight: 600; color: #1f2937; }
     .pm-status-pending { background: #e2e8f0; color: #334155; }
-    .pm-status-paid { background: #dbeafe; color: #1d4ed8; }
-    .pm-status-shipping { background: #fef3c7; color: #92400e; }
+    .pm-status-processing { background: #dbeafe; color: #1d4ed8; }
+    .pm-status-shipped { background: #fef3c7; color: #92400e; }
+    .pm-status-delivered { background: #ede9fe; color: #6d28d9; }
     .pm-status-completed { background: #dcfce7; color: #166534; }
     .pm-status-cancelled { background: #fee2e2; color: #991b1b; }
     .om-empty { padding: 22px 0; text-align: center; color: #94a3b8; }
@@ -165,7 +178,7 @@ if ($orderResult) {
                     <select class="pm-select" id="status" name="status">
                         <option value="">全部狀態</option>
                         <?php foreach ($allowedStatuses as $status): ?>
-                            <option value="<?php echo h($status); ?>" <?php echo $status === $statusFilter ? 'selected' : ''; ?>><?php echo h($status); ?></option>
+                            <option value="<?php echo h($status); ?>" <?php echo $status === $statusFilter ? 'selected' : ''; ?>><?php echo h(orderStatusLabel($status)); ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -184,8 +197,9 @@ if ($orderResult) {
                     <input type="hidden" name="action" value="bulk_update_orders">
                     <select class="pm-select" name="status" style="max-width:200px;">
                         <option value="">批次操作</option>
-                        <option value="PAID">批次改為已付款</option>
-                        <option value="SHIPPING">批次出貨</option>
+                        <option value="PROCESSING">批次改為處理中</option>
+                        <option value="SHIPPED">批次出貨</option>
+                        <option value="DELIVERED">批次改為已送達</option>
                         <option value="COMPLETED">批次完成</option>
                         <option value="CANCELLED">批次取消</option>
                     </select>
@@ -216,8 +230,9 @@ if ($orderResult) {
                         <?php foreach ($orders as $order): ?>
                             <?php
                             $statusClass = 'pm-status-pending';
-                            if ($order['status'] === 'PAID') { $statusClass = 'pm-status-paid'; }
-                            if ($order['status'] === 'SHIPPING') { $statusClass = 'pm-status-shipping'; }
+                            if ($order['status'] === 'PROCESSING') { $statusClass = 'pm-status-processing'; }
+                            if ($order['status'] === 'SHIPPED') { $statusClass = 'pm-status-shipped'; }
+                            if ($order['status'] === 'DELIVERED') { $statusClass = 'pm-status-delivered'; }
                             if ($order['status'] === 'COMPLETED') { $statusClass = 'pm-status-completed'; }
                             if ($order['status'] === 'CANCELLED') { $statusClass = 'pm-status-cancelled'; }
                             ?>
@@ -232,7 +247,7 @@ if ($orderResult) {
                                 </td>
                                 <td>NT$ <?php echo number_format((float)$order['total_amount']); ?></td>
                                 <td><?php echo intval($order['item_count']); ?> 件</td>
-                                <td><span class="pm-badge <?php echo h($statusClass); ?>"><?php echo h($order['status']); ?></span></td>
+                                <td><span class="pm-badge <?php echo h($statusClass); ?>"><?php echo h(orderStatusLabel($order['status'])); ?></span></td>
                                 <td><?php echo h($order['created_at']); ?></td>
                                 <td>
                                     <a class="pm-btn pm-btn-edit pm-btn-sm" href="<?php echo h(buildFilterQuery(['order_id' => intval($order['order_id'])])); ?>">查看詳情</a>
@@ -361,7 +376,7 @@ if ($orderResult) {
                                 <label for="status_update">訂單狀態</label>
                                 <select class="pm-select" id="status_update" name="status">
                                     <?php foreach ($allowedStatuses as $status): ?>
-                                        <option value="<?php echo h($status); ?>" <?php echo $detail['status'] === $status ? 'selected' : ''; ?>><?php echo h($status); ?></option>
+                                        <option value="<?php echo h($status); ?>" <?php echo $detail['status'] === $status ? 'selected' : ''; ?>><?php echo h(orderStatusLabel($status)); ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>

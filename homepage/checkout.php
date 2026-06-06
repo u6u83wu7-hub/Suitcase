@@ -8,6 +8,7 @@ $activeNav = '';
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+date_default_timezone_set('Asia/Taipei');
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -21,39 +22,12 @@ if ($conn->connect_error) {
 }
 $conn->set_charset('utf8mb4');
 require_once __DIR__ . '/includes/storefront_helpers.php';
+require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
-if (!function_exists('sfResolveFrontPrice')) {
-    function sfResolveFrontPrice($conn, $productId, $originalPrice, $memberPrice = null) {
-        $isMember = false;
-        if (isset($_SESSION['user_id']) && $conn instanceof mysqli) {
-            $stmt = $conn->prepare('SELECT membership_level FROM users WHERE user_id = ? LIMIT 1');
-            if ($stmt) {
-                $userId = intval($_SESSION['user_id']);
-                $stmt->bind_param('i', $userId);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                if ($res && ($row = $res->fetch_assoc())) {
-                    $isMember = intval($row['membership_level'] ?? 0) > 0;
-                }
-                $stmt->close();
-            }
-        }
-
-        $basePrice = ($isMember && $memberPrice !== null && $memberPrice !== '' && floatval($memberPrice) > 0)
-            ? floatval($memberPrice)
-            : floatval($originalPrice);
-
-        return [
-            'is_member' => $isMember,
-            'base_price' => $basePrice,
-            'base_label' => $isMember ? '會員價' : '原價',
-            'final_price' => $basePrice,
-            'headline_label' => $isMember ? '會員價' : '原價',
-            'has_promotion' => false,
-            'promotion' => null,
-        ];
-    }
-}
+apRunPromotionSync($conn);
+$currentUserMembershipLevel = apFetchUserMembershipLevel($conn, $userId);
+$isMemberPriceEligible = apIsMemberPriceEligible($currentUserMembershipLevel);
 
 function checkoutTableExists($conn, $tableName) {
     $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -117,9 +91,12 @@ $userColumns = checkoutTableExists($conn, 'users') ? checkoutTableColumns($conn,
 $memberColumns = checkoutTableExists($conn, 'user_member_details') ? checkoutTableColumns($conn, 'user_member_details') : [];
 $orderColumns = checkoutTableExists($conn, 'orders') ? checkoutTableColumns($conn, 'orders') : [];
 $orderItemColumns = checkoutTableExists($conn, 'order_items') ? checkoutTableColumns($conn, 'order_items') : [];
+$variantColumns = checkoutTableExists($conn, 'product_variants') ? checkoutTableColumns($conn, 'product_variants') : [];
 
 $hasShippingNotesColumn = in_array('shipping_notes', $orderColumns, true);
 $hasNoteColumn = in_array('note', $orderColumns, true);
+$hasInventoryDeductedColumn = in_array('inventory_deducted', $orderColumns, true);
+$hasVariantStockColumn = in_array('stock_available', $variantColumns, true);
 $hasOrderItemProductIdColumn = in_array('product_id', $orderItemColumns, true);
 $hasOrderItemVariantNameColumn = in_array('variant_name', $orderItemColumns, true);
 $hasOrderItemUnitPriceColumn = in_array('unit_price', $orderItemColumns, true);
@@ -176,6 +153,7 @@ $totalAmount = 0;
 if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
     $idList = implode(',', array_map('intval', $selectedIds));
     $imageOrder = 'pi.is_main DESC, pi.sort_order ASC, pi.image_id ASC';
+    $fallbackPriceSql = apVariantPriceSql('pv', $isMemberPriceEligible);
     $sql = "
         SELECT
             ci.cart_item_id,
@@ -187,7 +165,9 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
             COALESCE(v.size_inches, '') AS variant_size,
             COALESCE(v.sku_code, '') AS sku_code,
             COALESCE(v.original_price, 0) AS original_price,
+            COALESCE(v.special_price, NULL) AS special_price,
             COALESCE(v.member_price, 0) AS member_price,
+            COALESCE(v.stock_available, 0) AS stock_available,
             COALESCE((
                 SELECT pi.image_url
                 FROM product_images pi
@@ -206,7 +186,7 @@ if (checkoutTableExists($conn, 'cart_items') && !empty($selectedIds)) {
                 LIMIT 1
             ), '') AS image_url,
             COALESCE((
-                SELECT MIN(COALESCE(pv.member_price, pv.original_price, 0))
+                SELECT MIN({$fallbackPriceSql})
                 FROM product_variants pv
                 WHERE pv.product_id = p.product_id
             ), 0) AS fallback_price
@@ -225,12 +205,13 @@ foreach ($items as &$item) {
         $item['quantity'] = $postedQuantities[$cartItemId];
     }
 
-    $priceInfo = sfResolveFrontPrice($conn, intval($item['product_id'] ?? 0), $item['original_price'] ?? 0, $item['member_price'] ?? null);
+    $priceInfo = apResolveVariantPrice($item, $isMemberPriceEligible);
     $displayPrice = floatval($priceInfo['final_price']);
     if ($displayPrice <= 0) {
         $displayPrice = floatval($item['fallback_price']);
     }
     $item['display_price'] = $displayPrice;
+    $item['price_label'] = $priceInfo['headline_label'];
     $item['subtotal'] = $displayPrice * intval($item['quantity']);
     $totalAmount += $item['subtotal'];
 }
@@ -325,9 +306,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $shippingFee = 0.00;
         $appliedCouponId = null;
         $discountAmount = 0.00;
+        $rewardPoints = 0;
 
         if ($formCouponId > 0) {
-            $couponStmt = $conn->prepare("SELECT coupon_id, coupon_type, coupon_value, min_order_amount, is_active, start_at, end_at, usage_limit, used_count FROM coupons WHERE coupon_id = ? LIMIT 1");
+            $couponStmt = $conn->prepare("SELECT coupon_id, coupon_type, coupon_value, min_order_amount, is_active, start_at, end_at FROM coupons WHERE coupon_id = ? LIMIT 1");
             if ($couponStmt) {
                 $couponStmt->bind_param('i', $formCouponId);
                 $couponStmt->execute();
@@ -356,12 +338,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         $couponOwned &&
                         ($couponStart === false || $now >= $couponStart) &&
                         ($couponEnd === false || $now <= $couponEnd) &&
-                        ((int)($couponRow['usage_limit'] ?? 0) <= 0 || (int)($couponRow['used_count'] ?? 0) < (int)$couponRow['usage_limit']) &&
                         $totalAmount >= $minOrderAmount) {
                         if (($couponRow['coupon_type'] ?? '') === 'DISCOUNT') {
                             $discountAmount = round($totalAmount * $couponValue / 100, 2);
                         } elseif (($couponRow['coupon_type'] ?? '') === 'REDUCE') {
                             $discountAmount = round($couponValue, 2);
+                        } elseif (($couponRow['coupon_type'] ?? '') === 'POINTS') {
+                            $rewardPoints = max(0, (int)round($couponValue));
                         }
                         $appliedCouponId = (int)$couponRow['coupon_id'];
                     }
@@ -497,6 +480,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
 
             $itemSql = 'INSERT INTO order_items (' . implode(', ', $itemColumns) . ') VALUES (' . implode(', ', $itemPlaceholders) . ')';
+            $deductStockStmt = null;
+            if ($hasVariantStockColumn) {
+                $deductStockStmt = $conn->prepare("UPDATE product_variants SET stock_available = stock_available - ? WHERE variant_id = ? AND stock_available >= ?");
+                if (!$deductStockStmt) {
+                    throw new RuntimeException('建立庫存扣減程序失敗。');
+                }
+            }
 
             foreach ($items as $item) {
                 $quantity = intval($item['quantity']);
@@ -509,6 +499,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $lockedPrice = $unitPrice;
                 $productId = intval($item['product_id']);
                 $subtotalAmount = $lockedPrice * $quantity;
+
+                if ($deductStockStmt !== null) {
+                    if ($variantId <= 0 || $quantity <= 0) {
+                        throw new RuntimeException('商品規格或數量不正確，無法建立訂單。');
+                    }
+                    $deductStockStmt->bind_param('iii', $quantity, $variantId, $quantity);
+                    if (!$deductStockStmt->execute() || $deductStockStmt->affected_rows !== 1) {
+                        throw new RuntimeException('商品庫存不足，請返回購物車調整數量。');
+                    }
+                }
 
                 $itemValues = [$orderId];
                 if ($hasOrderItemProductIdColumn) {
@@ -546,6 +546,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     throw new RuntimeException('訂單明細寫入失敗。');
                 }
                 $itemStmt->close();
+            }
+
+            if ($deductStockStmt !== null) {
+                $deductStockStmt->close();
+            }
+
+            if ($hasInventoryDeductedColumn && $hasVariantStockColumn) {
+                $inventoryFlag = 1;
+                $markInventoryStmt = $conn->prepare("UPDATE orders SET inventory_deducted = ? WHERE order_id = ?");
+                if (!$markInventoryStmt) {
+                    throw new RuntimeException('更新訂單庫存狀態失敗。');
+                }
+                $markInventoryStmt->bind_param('ii', $inventoryFlag, $orderId);
+                if (!$markInventoryStmt->execute()) {
+                    throw new RuntimeException('更新訂單庫存狀態失敗。');
+                }
+                $markInventoryStmt->close();
             }
 
             if ($appliedCouponId !== null) {
@@ -595,6 +612,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     }
                     $deleteDistributionStmt->close();
                 }
+            }
+
+            if ($rewardPoints > 0) {
+                $pointStmt = $conn->prepare("UPDATE users SET points_balance = points_balance + ? WHERE user_id = ?");
+                if (!$pointStmt) {
+                    throw new RuntimeException('更新會員點數失敗。');
+                }
+                $pointStmt->bind_param('ii', $rewardPoints, $userId);
+                if (!$pointStmt->execute()) {
+                    throw new RuntimeException('更新會員點數失敗。');
+                }
+                $pointStmt->close();
             }
 
             $cartIds = array_map('intval', $selectedIds);

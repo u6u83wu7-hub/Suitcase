@@ -44,13 +44,8 @@ function getVariantUnitPrice(variant) {
     if (!variant) {
         return null;
     }
-    if (isMemberUser && variant.member_price !== null && variant.member_price !== '') {
-        return Number(variant.member_price);
-    }
-    if (variant.special_price !== null && variant.special_price !== '') {
-        return Number(variant.special_price);
-    }
-    return Number(variant.original_price);
+    const breakdown = getPriceBreakdown(variant);
+    return breakdown ? breakdown.headline : null;
 }
 
 function getPriceBreakdown(variant) {
@@ -59,10 +54,12 @@ function getPriceBreakdown(variant) {
     }
 
     const original = Number(variant.original_price);
-    const special = (variant.special_price !== null && variant.special_price !== '') ? Number(variant.special_price) : null;
-    const member = (variant.member_price !== null && variant.member_price !== '') ? Number(variant.member_price) : null;
+    const specialValue = (variant.special_price !== null && variant.special_price !== '') ? Number(variant.special_price) : null;
+    const memberValue = (variant.member_price !== null && variant.member_price !== '') ? Number(variant.member_price) : null;
+    const special = (specialValue !== null && !Number.isNaN(specialValue) && specialValue >= 0) ? specialValue : null;
+    const member = (memberValue !== null && !Number.isNaN(memberValue) && memberValue > 0) ? memberValue : null;
     let headline = original;
-    let label = '售價';
+    let label = '原價';
 
     if (isMemberUser) {
         const candidates = [original];
@@ -87,7 +84,7 @@ function getPriceBreakdown(variant) {
 }
 
 function getVariantMemberPrice(variant) {
-    if (!variant || variant.member_price === null || variant.member_price === '') {
+    if (!variant || variant.member_price === null || variant.member_price === '' || Number(variant.member_price) <= 0) {
         return null;
     }
     return Number(variant.member_price);
@@ -126,7 +123,7 @@ function updatePriceUI(variant) {
     if (priceMember) priceMember.textContent = breakdown.member !== null ? formatPrice(breakdown.member) : '--';
     if (priceSpecial) priceSpecial.textContent = breakdown.special !== null ? formatPrice(breakdown.special) : '--';
 
-    if (priceOriginalRow) priceOriginalRow.classList.toggle('is-hidden', breakdown.label === '售價');
+    if (priceOriginalRow) priceOriginalRow.classList.toggle('is-hidden', breakdown.label === '原價');
     if (priceMemberRow) priceMemberRow.classList.toggle('is-hidden', breakdown.label === '會員價' || breakdown.member === null);
     if (priceSpecialRow) priceSpecialRow.classList.toggle('is-hidden', breakdown.label === '特價' || breakdown.special === null);
 

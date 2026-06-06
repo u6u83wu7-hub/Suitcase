@@ -59,6 +59,14 @@ function couponTypeText($type) {
     }
 }
 
+function membershipLevelText($level) {
+    $level = trim((string)$level);
+    if ($level === '3') return 'VVIP';
+    if ($level === '2') return 'VIP';
+    if ($level === '1') return '一般會員';
+    return $level;
+}
+
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
     'email' => isset($_SESSION['user_email']) ? $_SESSION['user_email'] : '',
@@ -81,99 +89,169 @@ $userLevel = $user['membership_level'] !== '' ? $conn->real_escape_string($user[
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
-    
-    // 1. 處理點擊「領取公開卷」
+    apRequireCsrf('profile.php?coupon_error=' . urlencode('表單驗證失敗，請重新操作。'));
+
+    $couponRedirect = function ($type, $message) {
+        header('Location: profile.php?' . http_build_query(['coupon_' . $type => $message]));
+        exit;
+    };
+
     if ($action === 'claim_coupon') {
-        $couponId = intval($_POST['coupon_id'] ?? 0);
-        if ($couponId > 0) {
-            $stmt = $conn->prepare("SELECT target_membership FROM coupons WHERE coupon_id = ? AND is_active = 1 AND (start_at IS NULL OR start_at <= NOW()) AND (end_at IS NULL OR end_at >= NOW()) AND (usage_limit IS NULL OR usage_limit = 0 OR used_count < usage_limit) AND (coupon_code IS NULL OR coupon_code = '')");
+        $couponId = (int)($_POST['coupon_id'] ?? 0);
+        if ($couponId <= 0) {
+            $couponRedirect('error', '找不到要領取的優惠卷。');
+        }
+
+        $conn->begin_transaction();
+        try {
+            $stmt = $conn->prepare("SELECT * FROM coupons WHERE coupon_id = ? AND (coupon_code IS NULL OR coupon_code = '') FOR UPDATE");
+            if (!$stmt) {
+                throw new RuntimeException('讀取優惠卷失敗。');
+            }
             $stmt->bind_param('i', $couponId);
             $stmt->execute();
             $validRes = $stmt->get_result();
-            if ($validRes && $validRes->num_rows > 0) {
-                $couponData = $validRes->fetch_assoc();
-                if (!empty($couponData['target_membership']) && $couponData['target_membership'] !== $userLevel) {
-                    header("Location: profile.php?coupon_error=" . urlencode("您的會員等級不符合此優惠卷的領取資格。"));
-                    exit;
-                }
-                
-                $check = $conn->query("SELECT distribution_id FROM coupon_distributions WHERE user_id = {$userId} AND coupon_id = {$couponId}");
-                if ($check && $check->num_rows === 0) {
-                    $conn->begin_transaction();
-                    try {
-                        $conn->query("INSERT INTO coupon_distributions (coupon_id, user_id, quantity, target_type, sent_by_admin_id) VALUES ({$couponId}, {$userId}, 1, 'SINGLE', 0)");
-                        $conn->query("UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = {$couponId}");
-                        $conn->commit();
-                        header("Location: profile.php?coupon_success=" . urlencode("成功領取優惠卷！"));
-                        exit;
-                    } catch (Exception $e) {
-                        $conn->rollback();
-                        header("Location: profile.php?coupon_error=" . urlencode("領取失敗，請稍後再試。"));
-                        exit;
-                    }
-                } else {
-                    header("Location: profile.php?coupon_error=" . urlencode("您已經領取過此優惠卷了！"));
-                    exit;
-                }
-            } else {
-                header("Location: profile.php?coupon_error=" . urlencode("此優惠卷無效或已被領取完畢！"));
-                exit;
+            $coupon = ($validRes && $validRes->num_rows > 0) ? $validRes->fetch_assoc() : null;
+            $stmt->close();
+
+            if (!$coupon) {
+                throw new RuntimeException('此優惠卷不存在或不可公開領取。');
             }
+
+            $now = time();
+            $start = !empty($coupon['start_at']) ? strtotime($coupon['start_at']) : false;
+            $end = !empty($coupon['end_at']) ? strtotime($coupon['end_at']) : false;
+            if ((int)$coupon['is_active'] !== 1 || ($start !== false && $now < $start) || ($end !== false && $now > $end)) {
+                throw new RuntimeException('此優惠卷尚未啟用或已過期。');
+            }
+            if ((int)($coupon['usage_limit'] ?? 0) > 0 && (int)($coupon['used_count'] ?? 0) >= (int)$coupon['usage_limit']) {
+                throw new RuntimeException('此優惠卷已被領取完畢。');
+            }
+            if (!empty($coupon['target_membership']) && $coupon['target_membership'] !== $userLevel) {
+                throw new RuntimeException('您的會員等級不符合此優惠卷的領取資格。');
+            }
+
+            $checkStmt = $conn->prepare('SELECT distribution_id FROM coupon_distributions WHERE user_id = ? AND coupon_id = ? LIMIT 1');
+            if (!$checkStmt) {
+                throw new RuntimeException('檢查領取紀錄失敗。');
+            }
+            $checkStmt->bind_param('ii', $userId, $couponId);
+            $checkStmt->execute();
+            $checkRes = $checkStmt->get_result();
+            $alreadyOwned = $checkRes && $checkRes->num_rows > 0;
+            $checkStmt->close();
+            if ($alreadyOwned) {
+                throw new RuntimeException('您已經領取過此優惠卷了。');
+            }
+
+            $insertStmt = $conn->prepare("INSERT INTO coupon_distributions (coupon_id, user_id, quantity, target_type, sent_by_admin_id) VALUES (?, ?, 1, 'SINGLE', 0)");
+            if (!$insertStmt) {
+                throw new RuntimeException('建立領取紀錄失敗。');
+            }
+            $insertStmt->bind_param('ii', $couponId, $userId);
+            if (!$insertStmt->execute()) {
+                throw new RuntimeException('建立領取紀錄失敗。');
+            }
+            $insertStmt->close();
+
+            $updateStmt = $conn->prepare('UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = ?');
+            $updateStmt->bind_param('i', $couponId);
+            if (!$updateStmt->execute()) {
+                throw new RuntimeException('更新領取數失敗。');
+            }
+            $updateStmt->close();
+
+            $conn->commit();
+            $couponRedirect('success', '成功領取優惠卷！');
+        } catch (Throwable $e) {
+            $conn->rollback();
+            $couponRedirect('error', $e->getMessage());
         }
     }
 
-    // 2. 處理輸入「專屬代碼兌換」
     if ($action === 'redeem_coupon_code') {
-        $redeemCode = trim($_POST['coupon_code'] ?? '');
-        if ($redeemCode !== '') {
-            $stmt = $conn->prepare("SELECT * FROM coupons WHERE coupon_code = ? LIMIT 1");
+        $redeemCode = strtoupper(trim((string)($_POST['coupon_code'] ?? '')));
+        $redeemCode = preg_replace('/\s+/', '', $redeemCode);
+        if ($redeemCode === '') {
+            $couponRedirect('error', '請輸入優惠碼。');
+        }
+
+        $conn->begin_transaction();
+        try {
+            $stmt = $conn->prepare('SELECT * FROM coupons WHERE coupon_code = ? LIMIT 1 FOR UPDATE');
+            if (!$stmt) {
+                throw new RuntimeException('讀取優惠碼失敗。');
+            }
             $stmt->bind_param('s', $redeemCode);
             $stmt->execute();
             $couponRes = $stmt->get_result();
-            
-            if ($couponRes && $couponRes->num_rows > 0) {
-                $coupon = $couponRes->fetch_assoc();
-                $couponId = intval($coupon['coupon_id']);
-                $now = time();
-                $start = strtotime($coupon['start_at']);
-                $end = strtotime($coupon['end_at']);
-                
-                if ((int)$coupon['is_active'] !== 1 || $now < $start || $now > $end) {
-                    header("Location: profile.php?coupon_error=" . urlencode("此優惠碼無效或已過期。"));
-                    exit;
-                }
-                if ((int)$coupon['usage_limit'] > 0 && (int)$coupon['used_count'] >= (int)$coupon['usage_limit']) {
-                    header("Location: profile.php?coupon_error=" . urlencode("此優惠碼已被兌換完畢。"));
-                    exit;
-                }
-                if (!empty($coupon['target_membership']) && $coupon['target_membership'] !== $userLevel) {
-                    header("Location: profile.php?coupon_error=" . urlencode("您的會員等級不符合此專屬代碼的兌換資格。"));
-                    exit;
-                }
+            $coupon = ($couponRes && $couponRes->num_rows > 0) ? $couponRes->fetch_assoc() : null;
+            $stmt->close();
 
-                $check = $conn->query("SELECT distribution_id FROM coupon_distributions WHERE user_id = {$userId} AND coupon_id = {$couponId}");
-                if ($check && $check->num_rows === 0) {
-                    $conn->begin_transaction();
-                    try {
-                        $conn->query("INSERT INTO coupon_distributions (coupon_id, user_id, quantity, target_type, sent_by_admin_id) VALUES ({$couponId}, {$userId}, 1, 'USE CODE', 0)");
-                        $conn->query("INSERT INTO coupon_code_uses (coupon_id, user_id, coupon_code) VALUES ({$couponId}, {$userId}, '{$redeemCode}')");
-                        $conn->query("UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = {$couponId}");
-                        $conn->commit();
-                        header("Location: profile.php?coupon_success=" . urlencode("成功兌換專屬優惠碼！"));
-                        exit;
-                    } catch (Exception $e) {
-                        $conn->rollback();
-                        header("Location: profile.php?coupon_error=" . urlencode("兌換發生錯誤。"));
-                        exit;
-                    }
-                } else {
-                    header("Location: profile.php?coupon_error=" . urlencode("您已經兌換過這個優惠碼了！"));
-                    exit;
-                }
-            } else {
-                header("Location: profile.php?coupon_error=" . urlencode("找不到此優惠碼！"));
-                exit;
+            if (!$coupon) {
+                throw new RuntimeException('找不到此優惠碼。');
             }
+
+            $couponId = (int)$coupon['coupon_id'];
+            $now = time();
+            $start = !empty($coupon['start_at']) ? strtotime($coupon['start_at']) : false;
+            $end = !empty($coupon['end_at']) ? strtotime($coupon['end_at']) : false;
+
+            if ((int)$coupon['is_active'] !== 1 || ($start !== false && $now < $start) || ($end !== false && $now > $end)) {
+                throw new RuntimeException('此優惠碼無效或已過期。');
+            }
+            if ((int)($coupon['usage_limit'] ?? 0) > 0 && (int)($coupon['used_count'] ?? 0) >= (int)$coupon['usage_limit']) {
+                throw new RuntimeException('此優惠碼已被兌換完畢。');
+            }
+            if (!empty($coupon['target_membership']) && $coupon['target_membership'] !== $userLevel) {
+                throw new RuntimeException('您的會員等級不符合此專屬代碼的兌換資格。');
+            }
+
+            $checkStmt = $conn->prepare('SELECT distribution_id FROM coupon_distributions WHERE user_id = ? AND coupon_id = ? LIMIT 1');
+            if (!$checkStmt) {
+                throw new RuntimeException('檢查兌換紀錄失敗。');
+            }
+            $checkStmt->bind_param('ii', $userId, $couponId);
+            $checkStmt->execute();
+            $checkRes = $checkStmt->get_result();
+            $alreadyOwned = $checkRes && $checkRes->num_rows > 0;
+            $checkStmt->close();
+            if ($alreadyOwned) {
+                throw new RuntimeException('您已經兌換過這個優惠碼了。');
+            }
+
+            $insertStmt = $conn->prepare("INSERT INTO coupon_distributions (coupon_id, user_id, quantity, target_type, sent_by_admin_id) VALUES (?, ?, 1, 'USE CODE', 0)");
+            if (!$insertStmt) {
+                throw new RuntimeException('建立兌換紀錄失敗。');
+            }
+            $insertStmt->bind_param('ii', $couponId, $userId);
+            if (!$insertStmt->execute()) {
+                throw new RuntimeException('建立兌換紀錄失敗。');
+            }
+            $insertStmt->close();
+
+            $codeUseStmt = $conn->prepare('INSERT INTO coupon_code_uses (coupon_id, user_id, coupon_code) VALUES (?, ?, ?)');
+            if (!$codeUseStmt) {
+                throw new RuntimeException('建立優惠碼紀錄失敗。');
+            }
+            $codeUseStmt->bind_param('iis', $couponId, $userId, $redeemCode);
+            if (!$codeUseStmt->execute()) {
+                throw new RuntimeException('建立優惠碼紀錄失敗。');
+            }
+            $codeUseStmt->close();
+
+            $updateStmt = $conn->prepare('UPDATE coupons SET used_count = used_count + 1 WHERE coupon_id = ?');
+            $updateStmt->bind_param('i', $couponId);
+            if (!$updateStmt->execute()) {
+                throw new RuntimeException('更新兌換數失敗。');
+            }
+            $updateStmt->close();
+
+            $conn->commit();
+            $couponRedirect('success', '成功兌換專屬優惠碼！');
+        } catch (Throwable $e) {
+            $conn->rollback();
+            $couponRedirect('error', $e->getMessage());
         }
     }
 }
@@ -402,13 +480,14 @@ include 'header.php';
                                 </td>
                                 <td style="padding:12px 6px; color:#64748b; font-size:12px;">
                                     滿 NT$<?php echo number_format(floatval($coupon['min_order_amount'])); ?><br>
-                                    <?php echo !empty($coupon['target_membership']) ? '限'.htmlspecialchars($coupon['target_membership']) : '不限等級'; ?>
+                                    <?php echo !empty($coupon['target_membership']) ? '限'.htmlspecialchars(membershipLevelText($coupon['target_membership'])) : '不限等級'; ?>
                                 </td>
                                 <td style="padding:12px 6px;"><?php echo htmlspecialchars($coupon['end_at'] ?? '無期限'); ?></td>
                                 <td style="padding:12px 6px;">
                                     <form method="POST" style="margin:0;">
                                         <input type="hidden" name="action" value="claim_coupon">
                                         <input type="hidden" name="coupon_id" value="<?php echo intval($coupon['coupon_id']); ?>">
+                                        <?php if(function_exists('apCsrfField')) echo apCsrfField(); ?>
                                         <button type="submit" style="padding:6px 16px; border-radius:999px; background:#b91c1c; color:#fff; font-weight:700; border:none; cursor:pointer;">立即領取</button>
                                     </form>
                                 </td>

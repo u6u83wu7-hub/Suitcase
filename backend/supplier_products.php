@@ -69,7 +69,21 @@ while ($recordRow = $recordResult->fetch_assoc()) {
 $recordStmt->close();
 
 $supplyRequests = [];
-$requestStmt = $conn->prepare("\n    SELECT\n        sr.request_id, sr.product_id, sr.variant_id, sr.requested_quantity, sr.note, sr.request_status, sr.created_at,\n        p.name AS product_name,\n        pv.sku_code, pv.color, pv.size_inches\n    FROM supply_requests sr\n    JOIN products p ON p.product_id = sr.product_id\n    LEFT JOIN product_variants pv ON pv.variant_id = sr.variant_id\n    WHERE p.supplier_id = ?\n    ORDER BY sr.created_at DESC, sr.request_id DESC\n");
+$requestStmt = $conn->prepare("
+    SELECT
+        sr.request_id, sr.product_id, sr.variant_id, sr.requested_quantity, sr.note, sr.request_status, sr.created_at,
+        p.name AS product_name,
+        pv.sku_code, pv.color, pv.size_inches,
+        COALESCE(SUM(ss.supply_quantity), 0) AS supplied_quantity,
+        GREATEST(sr.requested_quantity - COALESCE(SUM(ss.supply_quantity), 0), 0) AS remaining_quantity
+    FROM supply_requests sr
+    JOIN products p ON p.product_id = sr.product_id
+    LEFT JOIN product_variants pv ON pv.variant_id = sr.variant_id
+    LEFT JOIN supplier_supplies ss ON ss.request_id = sr.request_id
+    WHERE p.supplier_id = ?
+    GROUP BY sr.request_id, sr.product_id, sr.variant_id, sr.requested_quantity, sr.note, sr.request_status, sr.created_at, p.name, pv.sku_code, pv.color, pv.size_inches
+    ORDER BY sr.created_at DESC, sr.request_id DESC
+");
 $requestStmt->bind_param('i', $supplierId);
 $requestStmt->execute();
 $requestResult = $requestStmt->get_result();
@@ -162,7 +176,9 @@ $requestStmt->close();
             <?php foreach ($supplyRequests as $request): ?>
                 <?php
                     $status = strtoupper((string)$request['request_status']);
-                    $canSupply = !in_array($status, ['COMPLETED'], true);
+                    $suppliedQuantity = intval($request['supplied_quantity'] ?? 0);
+                    $remainingQuantity = intval($request['remaining_quantity'] ?? max(0, intval($request['requested_quantity']) - $suppliedQuantity));
+                    $canSupply = !in_array($status, ['COMPLETED', 'CANCELLED'], true) && $remainingQuantity > 0;
                     $requestFormId = 'request-form-' . intval($request['request_id']);
                 ?>
                 <div id="request-card-<?php echo intval($request['request_id']); ?>" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px;">
@@ -178,6 +194,7 @@ $requestStmt->close();
                                 <?php if (!empty($request['size_inches'])): ?> / <?php echo htmlspecialchars($request['size_inches']); ?><?php endif; ?>
                             </div>
                             <div style="font-size:13px; color:#475569; margin-top:4px;">預期數量：<?php echo intval($request['requested_quantity']); ?></div>
+                            <div style="font-size:13px; color:#475569; margin-top:4px;">已供應：<?php echo $suppliedQuantity; ?> / 剩餘：<?php echo $remainingQuantity; ?></div>
                             <?php if (!empty($request['note'])): ?>
                                 <div style="font-size:13px; color:#64748b; margin-top:4px;">備註：<?php echo htmlspecialchars($request['note']); ?></div>
                             <?php endif; ?>
@@ -202,7 +219,7 @@ $requestStmt->close();
                                 <div style="font-size:13px; color:#64748b;">此表單已預設商品與 SKU，廠商只能調整供應數量。</div>
 
                                 <label style="font-weight:700; color:#475569; font-size:13px;">供應數量</label>
-                                <input type="number" name="supply_quantity" min="1" step="1" required value="<?php echo intval($request['requested_quantity']); ?>" placeholder="請輸入數量">
+                                <input type="number" name="supply_quantity" min="1" max="<?php echo max(1, $remainingQuantity); ?>" step="1" required value="<?php echo max(1, $remainingQuantity); ?>" placeholder="請輸入數量">
 
                                 <label style="font-weight:700; color:#475569; font-size:13px;">備註（選填）</label>
                                 <textarea name="note" rows="3" placeholder="例如：分批供應、數量不足..." style="width:100%; padding:10px; box-sizing:border-box; border:1px solid #ddd; border-radius:6px;"><?php echo htmlspecialchars($request['note'] ?? ''); ?></textarea>
@@ -270,30 +287,4 @@ function toggleRequestForm(formId) {
     form.style.display = (form.style.display === 'none' || form.style.display === '') ? 'block' : 'none';
 }
 
-// If the backend redirected with completed_request_id, update the DOM to reflect completed state
-(function applyCompletedRequestFromQuery() {
-    try {
-        const params = new URLSearchParams(window.location.search);
-        const id = params.get('completed_request_id');
-        if (!id) return;
-        // hide supply button, hide form, and mark badge as COMPLETED
-        const badge = document.getElementById('request-badge-' + id);
-        if (badge) {
-            badge.textContent = 'COMPLETED';
-            badge.classList.remove('pm-off', 'pm-featured');
-            badge.classList.add('pm-on');
-        }
-        const btn = document.getElementById('supply-btn-' + id);
-        if (btn) btn.style.display = 'none';
-        const formDiv = document.getElementById('request-form-' + id);
-        if (formDiv) formDiv.style.display = 'none';
-        // remove query param from URL for cleanliness
-        params.delete('completed_request_id');
-        const newQuery = params.toString();
-        const newUrl = window.location.pathname + (newQuery ? ('?' + newQuery) : '');
-        window.history.replaceState({}, '', newUrl);
-    } catch (e) {
-        // ignore
-    }
-})();
 </script>

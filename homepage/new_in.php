@@ -10,13 +10,19 @@ if (defined('MYSQLI_REPORT_OFF') && function_exists('mysqli_report')) {
 
 $pageTitle = 'NEW IN 新品 | All Pass 行李箱專賣';
 $activeNav = 'new_in';
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 require_once __DIR__ . '/includes/storefront_helpers.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
 }
 $conn->set_charset('utf8mb4');
+$currentUserMembershipLevel = !empty($_SESSION['user_id']) ? apFetchUserMembershipLevel($conn, intval($_SESSION['user_id'])) : null;
+$isMemberPriceEligible = apIsMemberPriceEligible($currentUserMembershipLevel);
 
 $categoryId = isset($_GET['category_id']) ? intval($_GET['category_id']) : 0;
 $categoryName = '';
@@ -49,6 +55,7 @@ include 'header.php';
         <div class="product-grid">
             <?php
             $imageOrderBy = sfProductImageOrder($conn, 'pi');
+            $priceSql = apVariantPriceSql('v', $isMemberPriceEligible);
             $categoryWhere = '';
             $categoryJoin = '';
             if ($categoryId > 0) {
@@ -59,7 +66,7 @@ include 'header.php';
             $sql = "SELECT
                         p.product_id,
                         p.name,
-                        MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                        MIN({$priceSql}) AS price,
                         (
                             SELECT pi.image_url
                             FROM product_images pi

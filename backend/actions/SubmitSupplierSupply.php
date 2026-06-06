@@ -74,19 +74,61 @@ if ($requestId > 0) {
     if (intval($requestRow['product_id']) !== $productId || intval($requestRow['variant_id']) !== $variantId) {
         goSupplierProducts('供應請求與送出內容不一致。');
     }
-    if (in_array(strtoupper((string)$requestRow['request_status']), ['COMPLETED', 'PARTIAL'], true)) {
+    if (in_array(strtoupper((string)$requestRow['request_status']), ['COMPLETED', 'CANCELLED'], true)) {
         goSupplierProducts('此請求已完成，不能再次供應。');
     }
 }
 
 $conn->begin_transaction();
 try {
+    $requestIdValue = null;
+    $alreadySuppliedQuantity = 0;
+    $requestedQuantity = 0;
+
+    if ($requestRow) {
+        $lockStmt = $conn->prepare("SELECT request_id, product_id, variant_id, requested_quantity, request_status FROM supply_requests WHERE request_id = ? FOR UPDATE");
+        $lockStmt->bind_param('i', $requestId);
+        $lockStmt->execute();
+        $requestRow = $lockStmt->get_result()->fetch_assoc();
+        $lockStmt->close();
+
+        if (!$requestRow) {
+            throw new Exception('找不到對應的供應請求。');
+        }
+        if (intval($requestRow['product_id']) !== $productId || intval($requestRow['variant_id']) !== $variantId) {
+            throw new Exception('供應請求與送出內容不一致。');
+        }
+
+        $status = strtoupper((string)$requestRow['request_status']);
+        if (in_array($status, ['COMPLETED', 'CANCELLED'], true)) {
+            throw new Exception('此請求已完成或取消，不能再次供應。');
+        }
+
+        $sumStmt = $conn->prepare("SELECT COALESCE(SUM(supply_quantity), 0) AS supplied_quantity FROM supplier_supplies WHERE request_id = ?");
+        $sumStmt->bind_param('i', $requestId);
+        $sumStmt->execute();
+        $sumRow = $sumStmt->get_result()->fetch_assoc();
+        $sumStmt->close();
+
+        $requestedQuantity = intval($requestRow['requested_quantity']);
+        $alreadySuppliedQuantity = intval($sumRow['supplied_quantity'] ?? 0);
+        $remainingQuantity = max(0, $requestedQuantity - $alreadySuppliedQuantity);
+        if ($remainingQuantity <= 0) {
+            throw new Exception('此請求已無剩餘供應數量。');
+        }
+        if ($supplyQuantity > $remainingQuantity) {
+            throw new Exception('供應數量不可超過剩餘數量 ' . $remainingQuantity . '。');
+        }
+
+        $requestIdValue = $requestId;
+    }
+
     if ($variantId > 0) {
-        $insertStmt = $conn->prepare("INSERT INTO supplier_supplies (supplier_id, admin_id, product_id, variant_id, supply_quantity, is_supply_complete, note) VALUES (?, ?, ?, ?, ?, 0, ?)");
-        $insertStmt->bind_param('iiiiis', $supplierId, $adminId, $productId, $variantId, $supplyQuantity, $note);
+        $insertStmt = $conn->prepare("INSERT INTO supplier_supplies (supplier_id, admin_id, request_id, product_id, variant_id, supply_quantity, is_supply_complete, note) VALUES (?, ?, ?, ?, ?, ?, 0, ?)");
+        $insertStmt->bind_param('iiiiiis', $supplierId, $adminId, $requestIdValue, $productId, $variantId, $supplyQuantity, $note);
     } else {
-        $insertStmt = $conn->prepare("INSERT INTO supplier_supplies (supplier_id, admin_id, product_id, supply_quantity, is_supply_complete, note) VALUES (?, ?, ?, ?, 0, ?)");
-        $insertStmt->bind_param('iiiis', $supplierId, $adminId, $productId, $supplyQuantity, $note);
+        $insertStmt = $conn->prepare("INSERT INTO supplier_supplies (supplier_id, admin_id, request_id, product_id, supply_quantity, is_supply_complete, note) VALUES (?, ?, ?, ?, ?, 0, ?)");
+        $insertStmt->bind_param('iiiiis', $supplierId, $adminId, $requestIdValue, $productId, $supplyQuantity, $note);
     }
 
     if (!$insertStmt->execute()) {
@@ -95,8 +137,8 @@ try {
     $insertStmt->close();
 
     if ($requestRow) {
-        $requestedQuantity = intval($requestRow['requested_quantity']);
-        $newStatus = ($supplyQuantity >= $requestedQuantity) ? 'COMPLETED' : 'PARTIAL';
+        $newTotalSupplied = $alreadySuppliedQuantity + $supplyQuantity;
+        $newStatus = ($newTotalSupplied >= $requestedQuantity) ? 'COMPLETED' : 'PARTIAL';
         $updateRequest = $conn->prepare("UPDATE supply_requests SET request_status = ? WHERE request_id = ?");
         $updateRequest->bind_param('si', $newStatus, $requestId);
         if (!$updateRequest->execute()) {
@@ -107,8 +149,7 @@ try {
 
     $conn->commit();
     if ($requestRow) {
-        // redirect back and include completed_request_id so UI can update immediately
-        $params = ['page' => 'supplier_products', 'message' => '已依請求送出供應資料，請求狀態已更新。', 'completed_request_id' => $requestId];
+        $params = ['page' => 'supplier_products', 'message' => '已依請求送出供應資料，請求狀態已更新。'];
         header('Location: backend.php?' . http_build_query($params));
         exit();
     }

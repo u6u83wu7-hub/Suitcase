@@ -35,6 +35,13 @@ function tableExists($conn, $table) {
     return $result && $result->num_rows > 0;
 }
 
+function indexExists($conn, $table, $indexName) {
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $table);
+    $safeIndex = $conn->real_escape_string($indexName);
+    $result = $conn->query("SHOW INDEX FROM `{$safeTable}` WHERE Key_name = '{$safeIndex}'");
+    return $result && $result->num_rows > 0;
+}
+
 // 📁 表格 1：管理員 (admin_users)
 $sql_admin = "CREATE TABLE IF NOT EXISTS `admin_users` (
     `admin_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -74,6 +81,7 @@ $sql_supplier_supplies = "CREATE TABLE IF NOT EXISTS `supplier_supplies` (
     `supply_id` INT AUTO_INCREMENT PRIMARY KEY,
     `supplier_id` INT NOT NULL,
     `admin_id` INT NOT NULL,
+    `request_id` INT NULL,
     `product_id` INT NOT NULL,
     `variant_id` INT NULL,
     `supply_quantity` INT NOT NULL,
@@ -81,6 +89,7 @@ $sql_supplier_supplies = "CREATE TABLE IF NOT EXISTS `supplier_supplies` (
     `note` VARCHAR(255) NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_supplier_supplies_supplier_id` (`supplier_id`),
+    INDEX `idx_supplier_supplies_request_id` (`request_id`),
     INDEX `idx_supplier_supplies_product_id` (`product_id`),
     INDEX `idx_supplier_supplies_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
@@ -93,8 +102,14 @@ if (tableExists($conn, 'supplier_supplies')) {
     if (!columnExists($conn, 'supplier_supplies', 'admin_id')) {
         $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `admin_id` INT NOT NULL AFTER `supplier_id`");
     }
+    if (!columnExists($conn, 'supplier_supplies', 'request_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `request_id` INT NULL AFTER `admin_id`");
+    }
+    if (!indexExists($conn, 'supplier_supplies', 'idx_supplier_supplies_request_id')) {
+        $conn->query("ALTER TABLE `supplier_supplies` ADD INDEX `idx_supplier_supplies_request_id` (`request_id`)");
+    }
     if (!columnExists($conn, 'supplier_supplies', 'product_id')) {
-        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `product_id` INT NOT NULL AFTER `admin_id`");
+        $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `product_id` INT NOT NULL AFTER `request_id`");
     }
     if (!columnExists($conn, 'supplier_supplies', 'variant_id')) {
         $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `variant_id` INT NULL AFTER `product_id`");
@@ -461,6 +476,146 @@ $sql_member_details = "CREATE TABLE IF NOT EXISTS `user_member_details` (
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_member_details);
+
+$sql_coupons = "CREATE TABLE IF NOT EXISTS `coupons` (
+    `coupon_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `coupon_code` VARCHAR(50) NULL,
+    `coupon_name` VARCHAR(120) NOT NULL,
+    `coupon_type` VARCHAR(20) NOT NULL DEFAULT 'DISCOUNT',
+    `coupon_value` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `min_order_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `target_membership` VARCHAR(20) NULL,
+    `usage_limit` INT NULL,
+    `used_count` INT NOT NULL DEFAULT 0,
+    `start_at` DATETIME NULL,
+    `end_at` DATETIME NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_coupons_code` (`coupon_code`),
+    INDEX `idx_coupons_active` (`is_active`),
+    INDEX `idx_coupons_dates` (`start_at`, `end_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_coupons);
+
+if (tableExists($conn, 'coupons')) {
+    if (!columnExists($conn, 'coupons', 'coupon_code')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `coupon_code` VARCHAR(50) NULL AFTER `coupon_id`");
+    }
+    if (!columnExists($conn, 'coupons', 'coupon_name')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `coupon_name` VARCHAR(120) NOT NULL AFTER `coupon_code`");
+    }
+    if (!columnExists($conn, 'coupons', 'coupon_type')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `coupon_type` VARCHAR(20) NOT NULL DEFAULT 'DISCOUNT' AFTER `coupon_name`");
+    }
+    if (!columnExists($conn, 'coupons', 'coupon_value')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `coupon_value` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `coupon_type`");
+    }
+    if (!columnExists($conn, 'coupons', 'min_order_amount')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `min_order_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `coupon_value`");
+    }
+    if (!columnExists($conn, 'coupons', 'target_membership')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `target_membership` VARCHAR(20) NULL AFTER `min_order_amount`");
+    }
+    if (!columnExists($conn, 'coupons', 'usage_limit')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `usage_limit` INT NULL AFTER `target_membership`");
+    }
+    if (!columnExists($conn, 'coupons', 'used_count')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `used_count` INT NOT NULL DEFAULT 0 AFTER `usage_limit`");
+    }
+    if (!columnExists($conn, 'coupons', 'start_at')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `start_at` DATETIME NULL AFTER `used_count`");
+    }
+    if (!columnExists($conn, 'coupons', 'end_at')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `end_at` DATETIME NULL AFTER `start_at`");
+    }
+    if (!columnExists($conn, 'coupons', 'is_active')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `end_at`");
+    }
+    if (!columnExists($conn, 'coupons', 'created_at')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `is_active`");
+    }
+    if (!indexExists($conn, 'coupons', 'idx_coupons_code')) {
+        $conn->query("ALTER TABLE `coupons` ADD INDEX `idx_coupons_code` (`coupon_code`)");
+    }
+    if (!indexExists($conn, 'coupons', 'idx_coupons_active')) {
+        $conn->query("ALTER TABLE `coupons` ADD INDEX `idx_coupons_active` (`is_active`)");
+    }
+    if (!indexExists($conn, 'coupons', 'idx_coupons_dates')) {
+        $conn->query("ALTER TABLE `coupons` ADD INDEX `idx_coupons_dates` (`start_at`, `end_at`)");
+    }
+}
+
+$sql_coupon_distributions = "CREATE TABLE IF NOT EXISTS `coupon_distributions` (
+    `distribution_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `coupon_id` INT NOT NULL,
+    `user_id` INT NOT NULL,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `target_type` VARCHAR(20) NOT NULL DEFAULT 'SINGLE',
+    `sent_by_admin_id` INT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_coupon_dist_coupon` (`coupon_id`),
+    INDEX `idx_coupon_dist_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_coupon_distributions);
+
+if (tableExists($conn, 'coupon_distributions')) {
+    if (!columnExists($conn, 'coupon_distributions', 'coupon_id')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `coupon_id` INT NOT NULL AFTER `distribution_id`");
+    }
+    if (!columnExists($conn, 'coupon_distributions', 'user_id')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `user_id` INT NOT NULL AFTER `coupon_id`");
+    }
+    if (!columnExists($conn, 'coupon_distributions', 'quantity')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `quantity` INT NOT NULL DEFAULT 1 AFTER `user_id`");
+    }
+    if (!columnExists($conn, 'coupon_distributions', 'target_type')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `target_type` VARCHAR(20) NOT NULL DEFAULT 'SINGLE' AFTER `quantity`");
+    }
+    if (!columnExists($conn, 'coupon_distributions', 'sent_by_admin_id')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `sent_by_admin_id` INT NULL AFTER `target_type`");
+    }
+    if (!columnExists($conn, 'coupon_distributions', 'created_at')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `sent_by_admin_id`");
+    }
+    if (!indexExists($conn, 'coupon_distributions', 'idx_coupon_dist_coupon')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD INDEX `idx_coupon_dist_coupon` (`coupon_id`)");
+    }
+    if (!indexExists($conn, 'coupon_distributions', 'idx_coupon_dist_user')) {
+        $conn->query("ALTER TABLE `coupon_distributions` ADD INDEX `idx_coupon_dist_user` (`user_id`)");
+    }
+}
+
+$sql_coupon_code_uses = "CREATE TABLE IF NOT EXISTS `coupon_code_uses` (
+    `coupon_code_use_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `coupon_id` INT NOT NULL,
+    `user_id` INT NOT NULL,
+    `coupon_code` VARCHAR(50) NOT NULL,
+    `used_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_coupon_code_uses_coupon` (`coupon_id`),
+    INDEX `idx_coupon_code_uses_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_coupon_code_uses);
+
+if (tableExists($conn, 'coupon_code_uses')) {
+    if (!columnExists($conn, 'coupon_code_uses', 'coupon_id')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD COLUMN `coupon_id` INT NOT NULL AFTER `coupon_code_use_id`");
+    }
+    if (!columnExists($conn, 'coupon_code_uses', 'user_id')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD COLUMN `user_id` INT NOT NULL AFTER `coupon_id`");
+    }
+    if (!columnExists($conn, 'coupon_code_uses', 'coupon_code')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD COLUMN `coupon_code` VARCHAR(50) NOT NULL AFTER `user_id`");
+    }
+    if (!columnExists($conn, 'coupon_code_uses', 'used_at')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD COLUMN `used_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `coupon_code`");
+    }
+    if (!indexExists($conn, 'coupon_code_uses', 'idx_coupon_code_uses_coupon')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD INDEX `idx_coupon_code_uses_coupon` (`coupon_id`)");
+    }
+    if (!indexExists($conn, 'coupon_code_uses', 'idx_coupon_code_uses_user')) {
+        $conn->query("ALTER TABLE `coupon_code_uses` ADD INDEX `idx_coupon_code_uses_user` (`user_id`)");
+    }
+}
 
 $sql_promotions = "CREATE TABLE IF NOT EXISTS `promotions` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,

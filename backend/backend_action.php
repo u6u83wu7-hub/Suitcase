@@ -32,6 +32,10 @@ if ($requestedAction === 'submit_supplier_supply') {
     $csrfReturnPage = 'backend.php?page=supplier_supplies';
 } elseif ($requestedAction === 'submit_supply_request') {
     $csrfReturnPage = 'backend.php?page=request_supply';
+} elseif (in_array($requestedAction, ['add_coupon', 'edit_coupon', 'delete_coupon', 'send_coupon'], true)) {
+    $csrfReturnPage = 'backend.php?page=coupon';
+} elseif ($requestedAction === 'update_member') {
+    $csrfReturnPage = 'backend.php?page=members';
 }
 
 apRequireCsrf($csrfReturnPage);
@@ -135,7 +139,7 @@ $actions = [
     'edit_coupon' => 'actions/CouponActions.php',
     'delete_coupon' => 'actions/CouponActions.php',
     'send_coupon' => 'actions/CouponActions.php',
-    'redeem_coupon_code' => 'actions/CouponActions.php',
+    'update_member' => 'actions/MemberActions.php',
     'add_category' => 'actions/CategoryActions.php',
     'update_category' => 'actions/CategoryActions.php',
     'delete_category' => 'actions/CategoryActions.php',

@@ -19,6 +19,14 @@ function couponTargetLabel($type, $adminId = 0) {
 	}
 }
 
+function couponMembershipLabel($level) {
+	$level = trim((string)$level);
+	if ($level === '3') return 'VVIP';
+	if ($level === '2') return 'VIP';
+	if ($level === '1') return '一般會員';
+	return $level;
+}
+
 $couponUseRows = [];
 $couponUseResult = $conn->query("SELECT cu.coupon_code_use_id, cu.coupon_id, cu.user_id, cu.coupon_code, cu.used_at, c.coupon_name, c.coupon_type, u.name AS user_name, u.email AS user_email FROM coupon_code_uses cu LEFT JOIN coupons c ON c.coupon_id = cu.coupon_id LEFT JOIN users u ON u.user_id = cu.user_id ORDER BY cu.used_at DESC, cu.coupon_code_use_id DESC");
 if ($couponUseResult) {
@@ -116,7 +124,7 @@ if (!empty($_GET['success'])) {
 								</td>
 								<td>
                                     <div style="font-weight:700; color:#0f172a;">滿 NT$ <?php echo number_format((float)($coupon['min_order_amount'] ?? 0)); ?></div>
-                                    <div style="font-size:12px; color:#64748b; margin-top:4px;"><?php echo !empty($coupon['target_membership']) ? '限「'.h($coupon['target_membership']).'」領取' : '不限會員等級'; ?></div>
+                                    <div style="font-size:12px; color:#64748b; margin-top:4px;"><?php echo !empty($coupon['target_membership']) ? '限「'.h(couponMembershipLabel($coupon['target_membership'])).'」領取' : '不限會員等級'; ?></div>
                                 </td>
 								<td style="font-size:13px; color:#444;">
 									<div>起：<?php echo h($coupon['start_at'] ?? ''); ?></div>
@@ -209,7 +217,12 @@ if (!empty($_GET['success'])) {
 
 				<div class="pm-col-6" style="grid-column: span 6;">
 					<label for="target_membership">領取資格 (會員等級限制)</label>
-					<input class="pm-input" type="text" id="target_membership" name="target_membership" placeholder="例如：VIP (留白代表全體可領)">
+					<select class="pm-select" id="target_membership" name="target_membership">
+						<option value="">不限會員等級</option>
+						<option value="1">一般會員</option>
+						<option value="2">VIP</option>
+						<option value="3">VVIP</option>
+					</select>
 				</div>
 				<div class="pm-col-6" style="grid-column: span 6;">
 					<label for="min_order_amount">結帳滿額限制</label>

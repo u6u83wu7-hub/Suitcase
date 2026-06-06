@@ -6,24 +6,19 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 require_once __DIR__ . '/includes/storefront_helpers.php';
+require_once __DIR__ . '/includes/promotion_price_sync.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
     die('資料庫連線失敗: ' . $conn->connect_error);
 }
 $conn->set_charset('utf8mb4');
+$conn->query("SET time_zone = '+08:00'");
+apRunPromotionSync($conn);
 
-$currentUserMembershipLevel = 1;
-if (!empty($_SESSION['user_id'])) {
-    $currentUserId = intval($_SESSION['user_id']);
-    $membershipRes = $conn->query('SELECT membership_level FROM users WHERE user_id = ' . $currentUserId . ' LIMIT 1');
-    if ($membershipRes && ($membershipRow = $membershipRes->fetch_assoc())) {
-        $currentUserMembershipLevel = intval($membershipRow['membership_level'] ?? 1);
-    }
-    if ($membershipRes) {
-        $membershipRes->free();
-    }
-}
+$currentUserMembershipLevel = !empty($_SESSION['user_id']) ? apFetchUserMembershipLevel($conn, intval($_SESSION['user_id'])) : null;
+$isMemberPriceEligible = apIsMemberPriceEligible($currentUserMembershipLevel);
 
 function ppH($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
@@ -110,6 +105,7 @@ if ($promotionId > 0 && ppTableExists($conn, 'promotions') && ppTableExists($con
                     LIMIT 1
                 ), '') AS image_url,
                 COALESCE(MIN(COALESCE(v.original_price, 0)), 0) AS original_price,
+                MIN(v.special_price) AS special_price,
                 COALESCE(MIN(COALESCE(v.member_price, v.original_price, 0)), 0) AS member_price
             FROM promotion_products pp
             INNER JOIN products p ON p.product_id = pp.product_id
@@ -181,10 +177,14 @@ include 'header.php';
                     <?php
                     $originalPrice = (float)$row['original_price'];
                     $memberPrice = (float)$row['member_price'];
-                    $basePrice = $currentUserMembershipLevel >= 2 ? $memberPrice : $originalPrice;
-                    $discountPrice = ppDiscountPrice($basePrice, $promotion['discount_type'], $promotion['discount_value']);
+                    $priceInfo = apResolveVariantPrice([
+                        'original_price' => $originalPrice,
+                        'special_price' => $row['special_price'],
+                        'member_price' => $memberPrice,
+                    ], $isMemberPriceEligible);
+                    $discountPrice = (float)$priceInfo['final_price'];
                     $imageUrl = !empty($row['image_url']) ? '../' . ltrim($row['image_url'], '/') : '';
-                    $priceLabel = $currentUserMembershipLevel >= 2 ? '會員優惠價起' : '一般優惠價起';
+                    $priceLabel = $priceInfo['headline_label'];
                     ?>
                     <article class="pp-card">
                         <div class="pp-image">
@@ -198,7 +198,7 @@ include 'header.php';
                             <div class="pp-name"><?php echo ppH($row['product_name']); ?></div>
                             <div class="pp-meta">
                                 <span>原價起：NT$ <?php echo number_format($originalPrice); ?></span>
-                                <?php if ($currentUserMembershipLevel >= 2): ?>
+                                <?php if ($isMemberPriceEligible): ?>
                                     <span>會員價起：NT$ <?php echo number_format($memberPrice > 0 ? $memberPrice : $originalPrice); ?></span>
                                 <?php endif; ?>
                                 <span><?php echo ppH($priceLabel); ?>：NT$ <?php echo number_format($discountPrice); ?></span>

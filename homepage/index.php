@@ -1,13 +1,19 @@
 <?php
 $pageTitle = 'All Pass 行李箱專賣 | Your All-Access Pass';
 $activeNav = '';
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 require_once __DIR__ . '/includes/storefront_helpers.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 if ($conn->connect_error) {
     die("資料庫連線失敗: " . $conn->connect_error);
 }
 $conn->set_charset('utf8mb4');
+$currentUserMembershipLevel = !empty($_SESSION['user_id']) ? apFetchUserMembershipLevel($conn, intval($_SESSION['user_id'])) : null;
+$isMemberPriceEligible = apIsMemberPriceEligible($currentUserMembershipLevel);
 
 $homepageBanners = sfFetchHomepageBanners($conn, 6);
 
@@ -56,10 +62,11 @@ include 'header.php';
              * i = product_images (圖床) -> 抓標記為 is_main=1 的展示圖
              */
                      $imageOrderBy = sfProductImageOrder($conn, 'pi2');
+                     $priceSql = apVariantPriceSql('v', $isMemberPriceEligible);
                      $sql = "SELECT
                                                 p.product_id,
                                                 p.name,
-                                                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                                                MIN({$priceSql}) AS price,
                                                 COALESCE(pi_main.image_url,
                                                         (
                                                                 SELECT pi2.image_url

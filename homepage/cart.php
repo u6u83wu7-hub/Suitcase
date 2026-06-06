@@ -9,6 +9,7 @@ if (session_status() === PHP_SESSION_NONE) {
 date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
 apConfigureErrorHandling();
 
@@ -24,6 +25,8 @@ if ($conn->connect_error) {
 }
 $conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);
+$currentUserMembershipLevel = apFetchUserMembershipLevel($conn, $userId);
+$isMemberPriceEligible = apIsMemberPriceEligible($currentUserMembershipLevel);
 
 function cartTableExists($conn, $tableName) {
     $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -88,6 +91,7 @@ if (cartTableExists($conn, 'cart_items')) {
 $items = [];
 if (cartTableExists($conn, 'cart_items')) {
     $imageOrder = 'pi.is_main DESC, pi.sort_order ASC, pi.image_id ASC';
+    $fallbackPriceSql = apVariantPriceSql('pv', $isMemberPriceEligible);
     $sql = "
         SELECT
             ci.cart_item_id,
@@ -126,7 +130,7 @@ if (cartTableExists($conn, 'cart_items')) {
                 ''
             ) AS image_url,
             COALESCE((
-                SELECT MIN(COALESCE(pv.special_price, pv.original_price))
+                SELECT MIN({$fallbackPriceSql})
                 FROM product_variants pv
                 WHERE pv.product_id = p.product_id
             ), 0) AS fallback_price
@@ -143,13 +147,13 @@ $notice = isset($_GET['notice']) ? $_GET['notice'] : '';
 $selectedIds = [];
 $totalAmount = 0;
 foreach ($items as &$item) {
-    $price = ($item['special_price'] !== null && $item['special_price'] !== '')
-        ? floatval($item['special_price'])
-        : floatval($item['original_price']);
+    $priceInfo = apResolveVariantPrice($item, $isMemberPriceEligible);
+    $price = (float)$priceInfo['final_price'];
     if ($price <= 0) {
         $price = floatval($item['fallback_price']);
     }
     $item['display_price'] = $price;
+    $item['price_label'] = $priceInfo['headline_label'];
     $item['variant_stock'] = isset($item['variant_stock']) ? intval($item['variant_stock']) : 0;
     $item['stock_warning'] = intval($item['quantity']) > $item['variant_stock'];
 }

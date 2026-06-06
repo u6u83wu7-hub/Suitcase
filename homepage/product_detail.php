@@ -39,12 +39,13 @@ date_default_timezone_set('Asia/Taipei');
 require_once __DIR__ . '/includes/promotion_price_sync.php';
 require_once __DIR__ . '/includes/storefront_helpers.php';
 require_once __DIR__ . '/includes/security.php';
+require_once __DIR__ . '/includes/price_helper.php';
 
 apConfigureErrorHandling();
 
 $cartNotice = '';
 $cartNoticeType = 'success';
-$currentUserMembershipLevel = 1;
+$currentUserMembershipLevel = null;
 
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($id <= 0) {
@@ -60,12 +61,7 @@ $conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);
 
 if (!empty($_SESSION['user_id'])) {
-    $currentUserId = intval($_SESSION['user_id']);
-    $membershipSql = 'SELECT membership_level FROM users WHERE user_id = ' . $currentUserId . ' LIMIT 1';
-    $membershipRes = safeQuery($conn, $membershipSql, 'membershipLevel');
-    if ($membershipRes && ($membershipRow = $membershipRes->fetch_assoc())) {
-        $currentUserMembershipLevel = intval($membershipRow['membership_level'] ?? 1);
-    }
+    $currentUserMembershipLevel = apFetchUserMembershipLevel($conn, intval($_SESSION['user_id']));
 }
 
 function safeQuery($conn, $sql, $tag = '') {
@@ -248,7 +244,7 @@ if ($defaultVariantData) {
         : $defaultVariantData['original_price'];
 }
 
-$isMemberUser = ($currentUserMembershipLevel === 2);
+$isMemberUser = apIsMemberPriceEligible($currentUserMembershipLevel);
 $defaultMemberPrice = ($defaultVariantData && $defaultVariantData['member_price'] !== null && $defaultVariantData['member_price'] !== '')
     ? floatval($defaultVariantData['member_price'])
     : null;
@@ -306,28 +302,9 @@ $defaultMemberPrice = ($defaultVariantData && $defaultVariantData['member_price'
     ? floatval($defaultVariantData['member_price'])
     : null;
 
-$defaultHeadlinePrice = $defaultOriginalPrice;
-$defaultHeadlineLabel = '售價';
-if ($defaultOriginalPrice !== null) {
-    if ($isMemberUser) {
-        $candidates = [$defaultOriginalPrice];
-        if ($defaultSpecialPrice !== null) {
-            $candidates[] = $defaultSpecialPrice;
-        }
-        if ($defaultMemberPrice !== null) {
-            $candidates[] = $defaultMemberPrice;
-        }
-        $defaultHeadlinePrice = min($candidates);
-        if ($defaultMemberPrice !== null && abs($defaultHeadlinePrice - $defaultMemberPrice) < 0.0001) {
-            $defaultHeadlineLabel = '會員價';
-        } elseif ($defaultSpecialPrice !== null && abs($defaultHeadlinePrice - $defaultSpecialPrice) < 0.0001) {
-            $defaultHeadlineLabel = '特價';
-        }
-    } elseif ($defaultSpecialPrice !== null && $defaultSpecialPrice < $defaultOriginalPrice) {
-        $defaultHeadlinePrice = $defaultSpecialPrice;
-        $defaultHeadlineLabel = '特價';
-    }
-}
+$defaultPriceInfo = $defaultVariantData ? apResolveVariantPrice($defaultVariantData, $isMemberUser) : null;
+$defaultHeadlinePrice = $defaultPriceInfo ? $defaultPriceInfo['final_price'] : $defaultOriginalPrice;
+$defaultHeadlineLabel = $defaultPriceInfo ? $defaultPriceInfo['headline_label'] : '原價';
 
 // 加入購物車：寫入 cart_items（存在則累加數量）
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_to_cart') {
@@ -503,6 +480,7 @@ if (tableExists($conn, 'product_category_links')) {
         $relatedImageOrder[] = 'pi.image_id ASC';
     }
     $relatedImageOrderSql = implode(', ', $relatedImageOrder);
+    $relatedPriceSql = apVariantPriceSql('v', $isMemberUser);
 
     if (!empty($categoryIds)) {
         $categoryList = implode(',', array_map('intval', $categoryIds));
@@ -513,7 +491,7 @@ if (tableExists($conn, 'product_category_links')) {
                 p.is_featured,
                 COUNT(DISTINCT pcl_match.category_id) AS match_count,
                 COALESCE(SUM(v.stock_available), 0) AS total_stock,
-                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                MIN({$relatedPriceSql}) AS price,
                 (
                     SELECT pi.image_url
                     FROM product_images pi
@@ -548,7 +526,7 @@ if (tableExists($conn, 'product_category_links')) {
                 p.is_featured,
                 0 AS match_count,
                 COALESCE(SUM(v.stock_available), 0) AS total_stock,
-                MIN(COALESCE(v.special_price, v.original_price)) AS price,
+                MIN({$relatedPriceSql}) AS price,
                 (
                     SELECT pi.image_url
                     FROM product_images pi
@@ -630,7 +608,7 @@ include 'header.php';
             <h1><?php echo htmlspecialchars($product['name']); ?></h1>
 
             <div class="price-stack">
-                <div id="priceOriginalRow" class="price-line<?php echo ($defaultHeadlineLabel === '售價') ? ' is-hidden' : ''; ?>">
+                <div id="priceOriginalRow" class="price-line<?php echo ($defaultHeadlineLabel === '原價') ? ' is-hidden' : ''; ?>">
                     <span>原價</span>
                     <span id="priceOriginal"><?php echo $defaultOriginalPrice !== null ? 'NT$ ' . number_format($defaultOriginalPrice) : '--'; ?></span>
                 </div>
