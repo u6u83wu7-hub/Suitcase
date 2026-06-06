@@ -1,4 +1,7 @@
 <?php
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
 // dashboard.php - 營運儀表板數據核心與頂級 UI/UX 視覺化頁面
 require_once __DIR__ . '/auth_guard.php';
 
@@ -43,7 +46,8 @@ if ($adminRoleId === 3 && $currentSupplierId !== null) {
     $vendorOrderWhereSql = ' AND EXISTS (
         SELECT 1
         FROM order_items oi2
-        JOIN products p2 ON p2.product_id = oi2.product_id
+        JOIN product_variants pv2 ON pv2.variant_id = oi2.variant_id
+        JOIN products p2 ON p2.product_id = pv2.product_id
         WHERE oi2.order_id = o.order_id
           AND p2.supplier_id = ' . intval($currentSupplierId) . '
     )';
@@ -62,7 +66,8 @@ if ($adminRoleId === 3 && $currentSupplierId !== null) {
     $resOrders = $conn->query("SELECT SUM(oi.quantity * oi.locked_price) AS total, COUNT(DISTINCT o.order_id) AS cnt
         FROM order_items oi
         JOIN orders o ON oi.order_id = o.order_id
-        JOIN products p ON p.product_id = oi.product_id
+        JOIN product_variants pv ON pv.variant_id = oi.variant_id
+        JOIN products p ON p.product_id = pv.product_id
         WHERE o.status != 'CANCELLED' AND p.supplier_id = " . intval($currentSupplierId));
 } else {
     $resOrders = $conn->query("SELECT SUM(total_amount) AS total, COUNT(order_id) AS cnt FROM orders WHERE status != 'CANCELLED'");
@@ -109,7 +114,8 @@ $maxQty = 1; // 用來當作 CSS 進度條的 100% 基準值
 $rankSql = "SELECT oi.product_name, SUM(oi.quantity) AS total_qty, SUM(oi.quantity * oi.locked_price) AS total_revenue
             FROM order_items oi
             JOIN orders o ON oi.order_id = o.order_id
-            JOIN products p ON p.product_id = oi.product_id
+            JOIN product_variants pv ON pv.variant_id = oi.variant_id
+            JOIN products p ON p.product_id = pv.product_id
             WHERE o.status != 'CANCELLED'" . ($adminRoleId === 3 && $currentSupplierId !== null ? ' AND p.supplier_id = ' . intval($currentSupplierId) : '') . "
             GROUP BY oi.product_name
             ORDER BY total_qty DESC LIMIT 5";
