@@ -382,60 +382,115 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $cartNotice = '表單驗證失敗，請重新操作。';
         $cartNoticeType = 'error';
     } else {
-    if (!isset($_SESSION['user_id'])) {
-        header('Location: login.php');
-        exit;
-    }
-
-    $userId = intval($_SESSION['user_id']);
-    $quantity = isset($_POST['quantity']) ? max(1, intval($_POST['quantity'])) : 1;
-    $variantId = isset($_POST['variant_id']) ? intval($_POST['variant_id']) : 0;
-
-    // 若未選規格且有 SKU，預設第一個 SKU
-    if ($variantId <= 0 && !empty($variants) && isset($variants[0]['variant_id'])) {
-        $variantId = intval($variants[0]['variant_id']);
-    }
-
-    $stockAvailable = null;
-    if ($variantId > 0) {
-        $stockStmt = $conn->prepare('SELECT stock_available FROM product_variants WHERE variant_id = ? AND product_id = ? LIMIT 1');
-        if ($stockStmt) {
-            $stockStmt->bind_param('ii', $variantId, $id);
-            $stockStmt->execute();
-            $stockRow = $stockStmt->get_result()->fetch_assoc();
-            $stockAvailable = $stockRow ? intval($stockRow['stock_available']) : 0;
-            $stockStmt->close();
+        if (!isset($_SESSION['user_id'])) {
+            header('Location: login.php');
+            exit;
         }
-    }
 
-    if (!tableExists($conn, 'cart_items')) {
-        $cartNotice = '購物車資料表不存在，請先執行同步腳本。';
-        $cartNoticeType = 'error';
-    } elseif ($stockAvailable !== null && $quantity > $stockAvailable) {
-        $cartNotice = '加入數量超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
-        $cartNoticeType = 'error';
-    } else {
-        $ok = false;
-        $alreadyInCart = false;
-        $cartErrorDetail = '';
+        $userId = intval($_SESSION['user_id']);
+        $quantity = isset($_POST['quantity']) ? max(1, intval($_POST['quantity'])) : 1;
+        $variantId = isset($_POST['variant_id']) ? intval($_POST['variant_id']) : 0;
 
+        // 若未選規格且有 SKU，預設第一個 SKU
+        if ($variantId <= 0 && !empty($variants) && isset($variants[0]['variant_id'])) {
+            $variantId = intval($variants[0]['variant_id']);
+        }
+
+        $stockAvailable = null;
         if ($variantId > 0) {
-            $checkStmt = $conn->prepare('SELECT cart_item_id, quantity FROM cart_items WHERE user_id = ? AND product_id = ? AND variant_id = ? LIMIT 1');
-            if ($checkStmt) {
-                $checkStmt->bind_param('iii', $userId, $id, $variantId);
-                $checkStmt->execute();
-                $checkStmt->store_result();
-                $checkStmt->bind_result($existsId, $existsQty);
+            $stockStmt = $conn->prepare('SELECT stock_available FROM product_variants WHERE variant_id = ? AND product_id = ? LIMIT 1');
+            if ($stockStmt) {
+                $stockStmt->bind_param('ii', $variantId, $id);
+                $stockStmt->execute();
+                $stockRow = $stockStmt->get_result()->fetch_assoc();
+                $stockAvailable = $stockRow ? intval($stockRow['stock_available']) : 0;
+                $stockStmt->close();
+            }
+        }
 
-                $hasExistingItem = $checkStmt->fetch();
-                $checkStmt->free_result();
+        if (!tableExists($conn, 'cart_items')) {
+            $cartNotice = '購物車資料表不存在，請先執行同步腳本。';
+            $cartNoticeType = 'error';
+        } elseif ($stockAvailable !== null && $quantity > $stockAvailable) {
+            $cartNotice = '加入數量超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
+            $cartNoticeType = 'error';
+        } else {
+            $ok = false;
+            $alreadyInCart = false;
+            $cartErrorDetail = '';
 
-                if ($hasExistingItem) {
-                    $alreadyInCart = true;
-                    $newQty = intval($existsQty) + $quantity;
-                    if ($stockAvailable !== null && $newQty > $stockAvailable) {
-                        $cartErrorDetail = '購物車已有此商品，累計數量會超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
+            if ($variantId > 0) {
+                $checkStmt = $conn->prepare('SELECT cart_item_id, quantity FROM cart_items WHERE user_id = ? AND product_id = ? AND variant_id = ? LIMIT 1');
+                if ($checkStmt) {
+                    $checkStmt->bind_param('iii', $userId, $id, $variantId);
+                    $checkStmt->execute();
+                    $checkStmt->store_result();
+                    $checkStmt->bind_result($existsId, $existsQty);
+
+                    $hasExistingItem = $checkStmt->fetch();
+                    $checkStmt->free_result();
+
+                    if ($hasExistingItem) {
+                        $alreadyInCart = true;
+                        
+                        // 【修正】判斷是否為「直接下單」，若是則以選擇的數量為主（不累加）
+                        if (isset($_POST['buy_now']) && $_POST['buy_now'] === '1') {
+                            $newQty = $quantity;
+                        } else {
+                            $newQty = intval($existsQty) + $quantity;
+                        }
+
+                        if ($stockAvailable !== null && $newQty > $stockAvailable) {
+                            $cartErrorDetail = '購物車已有此商品，累計數量會超過庫存，目前庫存 ' . $stockAvailable . ' 件。';
+                        } else {
+                            $upStmt = $conn->prepare('UPDATE cart_items SET quantity = ?, created_at = NOW() WHERE cart_item_id = ?');
+                            if ($upStmt) {
+                                $upStmt->bind_param('ii', $newQty, $existsId);
+                                $ok = $upStmt->execute();
+                                if (!$ok) {
+                                    $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
+                                }
+                                $upStmt->close();
+                            } else {
+                                $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
+                            }
+                        }
                     } else {
+                        $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)');
+                        if ($insStmt) {
+                            $insStmt->bind_param('iiii', $userId, $id, $variantId, $quantity);
+                            $ok = $insStmt->execute();
+                            if (!$ok) {
+                                $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
+                            }
+                            $insStmt->close();
+                        } else {
+                            $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
+                        }
+                    }
+                    $checkStmt->close();
+                }
+            } else {
+                $checkStmt = $conn->prepare('SELECT cart_item_id, quantity FROM cart_items WHERE user_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1');
+                if ($checkStmt) {
+                    $checkStmt->bind_param('ii', $userId, $id);
+                    $checkStmt->execute();
+                    $checkStmt->store_result();
+                    $checkStmt->bind_result($existsId, $existsQty);
+
+                    $hasExistingItem = $checkStmt->fetch();
+                    $checkStmt->free_result();
+
+                    if ($hasExistingItem) {
+                        $alreadyInCart = true;
+                        
+                        // 【修正】判斷是否為「直接下單」，若是則以選擇的數量為主（不累加）
+                        if (isset($_POST['buy_now']) && $_POST['buy_now'] === '1') {
+                            $newQty = $quantity;
+                        } else {
+                            $newQty = intval($existsQty) + $quantity;
+                        }
+
                         $upStmt = $conn->prepare('UPDATE cart_items SET quantity = ?, created_at = NOW() WHERE cart_item_id = ?');
                         if ($upStmt) {
                             $upStmt->bind_param('ii', $newQty, $existsId);
@@ -447,83 +502,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         } else {
                             $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
                         }
-                    }
-                } else {
-                    $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, ?, ?)');
-                    if ($insStmt) {
-                        $insStmt->bind_param('iiii', $userId, $id, $variantId, $quantity);
-                        $ok = $insStmt->execute();
-                        if (!$ok) {
-                            $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
-                        }
-                        $insStmt->close();
                     } else {
-                        $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
+                        $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, NULL, ?)');
+                        if ($insStmt) {
+                            $insStmt->bind_param('iii', $userId, $id, $quantity);
+                            $ok = $insStmt->execute();
+                            if (!$ok) {
+                                $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
+                            }
+                            $insStmt->close();
+                        } else {
+                            $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
+                        }
                     }
+                    $checkStmt->close();
                 }
-                $checkStmt->close();
             }
-        } else {
-            $checkStmt = $conn->prepare('SELECT cart_item_id, quantity FROM cart_items WHERE user_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1');
-            if ($checkStmt) {
-                $checkStmt->bind_param('ii', $userId, $id);
-                $checkStmt->execute();
-                $checkStmt->store_result();
-                $checkStmt->bind_result($existsId, $existsQty);
 
-                $hasExistingItem = $checkStmt->fetch();
-                $checkStmt->free_result();
-
-                if ($hasExistingItem) {
-                    $alreadyInCart = true;
-                    $newQty = intval($existsQty) + $quantity;
-                    $upStmt = $conn->prepare('UPDATE cart_items SET quantity = ?, created_at = NOW() WHERE cart_item_id = ?');
-                    if ($upStmt) {
-                        $upStmt->bind_param('ii', $newQty, $existsId);
-                        $ok = $upStmt->execute();
-                        if (!$ok) {
-                            $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
-                        }
-                        $upStmt->close();
-                    } else {
-                        $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
-                    }
-                } else {
-                    $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, NULL, ?)');
-                    if ($insStmt) {
-                        $insStmt->bind_param('iii', $userId, $id, $quantity);
-                        $ok = $insStmt->execute();
-                        if (!$ok) {
-                            $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
-                        }
-                        $insStmt->close();
-                    } else {
-                        $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
-                    }
+            if ($ok) {
+                // 💡 如果是點擊「直接下單」，加入購物車成功後直接跳轉購物車頁面
+                if (isset($_POST['buy_now']) && $_POST['buy_now'] === '1') {
+                    header('Location: cart.php');
+                    exit;
                 }
-                $checkStmt->close();
-            }
-        }
 
-        if ($ok) {
-            // 💡 如果是點擊「直接下單」，加入購物車成功後直接跳轉購物車頁面
-            if (isset($_POST['buy_now']) && $_POST['buy_now'] === '1') {
-                header('Location: cart.php');
-                exit;
-            }
-
-            if ($alreadyInCart) {
-                $cartNotice = '購物車已有該筆商品，已幫你更新數量，請前往購物車修改。';
+                if ($alreadyInCart) {
+                    $cartNotice = '購物車已有該筆商品，已幫你更新數量，請前往購物車修改。';
+                } else {
+                    $cartNotice = '已加入購物車';
+                }
+                $cartNoticeType = 'success';
             } else {
-                $cartNotice = '已加入購物車';
+                $cartNotice = $cartErrorDetail !== '' ? $cartErrorDetail : '加入購物車失敗，請稍後再試。';
+                $cartNoticeType = 'error';
+                pdLog('ADD_CART_FAIL user=' . $userId . ', product=' . $id . ', variant=' . $variantId . ', err=' . $conn->error);
             }
-            $cartNoticeType = 'success';
-        } else {
-            $cartNotice = $cartErrorDetail !== '' ? $cartErrorDetail : '加入購物車失敗，請稍後再試。';
-            $cartNoticeType = 'error';
-            pdLog('ADD_CART_FAIL user=' . $userId . ', product=' . $id . ', variant=' . $variantId . ', err=' . $conn->error);
         }
-    }
     }
 }
 

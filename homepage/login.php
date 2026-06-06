@@ -148,7 +148,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 <div class="remember-forgot">
                     <label><input type="checkbox" name="remember">記住我</label>
-                    <a href="#" class="forgot-link">忘記密碼？</a>
+                    <a href="forgot_password.php" class="forgot-link">忘記密碼？</a>
                 </div>
 
                 <button type="submit" class="login-btn">登入</button>
