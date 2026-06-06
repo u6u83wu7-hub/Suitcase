@@ -144,6 +144,9 @@ if (cartTableExists($conn, 'cart_items')) {
 }
 
 $notice = isset($_GET['notice']) ? $_GET['notice'] : '';
+// 💡 取得從 product_detail.php 傳過來的剛加入商品 ID
+$buyNowItem = isset($_GET['buy_now_item']) ? intval($_GET['buy_now_item']) : 0;
+
 $selectedIds = [];
 $totalAmount = 0;
 foreach ($items as &$item) {
@@ -203,13 +206,15 @@ include 'header.php';
                             <?php
                             $displayPrice = floatval($item['display_price']);
                             $subtotal = $displayPrice * intval($item['quantity']);
-                            $totalAmount += $subtotal;
                             $imageUrl = $item['image_url'] !== '' ? '../' . ltrim($item['image_url'], '/') : '';
                             $variantLabel = trim(($item['variant_size'] !== '' ? $item['variant_size'] . '吋' : '') . (($item['variant_color'] !== '' && $item['variant_size'] !== '') ? ' / ' : '') . ($item['variant_color'] !== '' ? $item['variant_color'] : ''));
+                            
+                            // 💡 判斷如果是剛才「直接下單」的商品，就把它設為 checked 狀態
+                            $isChecked = ($buyNowItem > 0 && $buyNowItem === intval($item['cart_item_id'])) ? 'checked' : '';
                             ?>
                             <tr style="border-bottom:1px solid #f3f3f3; vertical-align:top;" data-cart-row data-cart-item-id="<?php echo intval($item['cart_item_id']); ?>">
                                 <td style="padding:14px 12px; text-align:center;">
-                                    <input type="checkbox" name="selected[]" value="<?php echo intval($item['cart_item_id']); ?>" style="width:18px; height:18px;" data-cart-checkbox>
+                                    <input type="checkbox" name="selected[]" value="<?php echo intval($item['cart_item_id']); ?>" <?php echo $isChecked; ?> style="width:18px; height:18px;" data-cart-checkbox>
                                 </td>
                                 <td style="padding:14px 12px;">
                                     <?php if ($imageUrl !== ''): ?>
@@ -244,7 +249,7 @@ include 'header.php';
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-top:18px;">
-                <div style="font-size:18px; font-weight:700; color:#222;">已勾選商品總額：NT$ <span id="selectedTotal"><?php echo number_format($totalAmount); ?></span></div>
+                <div style="font-size:18px; font-weight:700; color:#222;">已勾選商品總額：NT$ <span id="selectedTotal">0</span></div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button type="submit" name="action" value="update_cart" style="padding:12px 18px; border:none; border-radius:999px; background:#111; color:#fff; font-weight:700; cursor:pointer;">更新購物車</button>
                     <button type="submit" name="action" value="checkout" formaction="checkout.php" formmethod="post" style="padding:12px 18px; border:none; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">前往結帳</button>
@@ -266,6 +271,14 @@ include 'header.php';
         return new Intl.NumberFormat('zh-TW').format(value);
     }
 
+    // 【新增】初始化：將原始的庫存上限存入 data-max-stock 中，作為備用
+    rows.forEach((row) => {
+        const qtyInput = row.querySelector('[data-cart-qty]');
+        if (qtyInput && !qtyInput.hasAttribute('data-max-stock')) {
+            qtyInput.setAttribute('data-max-stock', qtyInput.getAttribute('max') || '1');
+        }
+    });
+
     function recalc() {
         let selectedTotal = 0;
 
@@ -281,8 +294,15 @@ include 'header.php';
                 subtotalEl.textContent = formatMoney(subtotal);
             }
 
-            if (checkbox && checkbox.checked) {
-                selectedTotal += subtotal;
+            if (checkbox && qtyInput) {
+                if (checkbox.checked) {
+                    selectedTotal += subtotal;
+                    // 【新增】有勾選時：恢復 HTML5 max 驗證
+                    qtyInput.setAttribute('max', qtyInput.getAttribute('data-max-stock'));
+                } else {
+                    // 【新增】未勾選時：移除 max 驗證，避免阻擋結帳按鈕送出
+                    qtyInput.removeAttribute('max');
+                }
             }
         });
 

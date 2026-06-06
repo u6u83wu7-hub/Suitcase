@@ -1,5 +1,5 @@
 // products.js - 商品管理模組的所有交互邏輯
-
+//版本3 (恢復下拉選單，複製時清空尺寸與顏色)
 document.addEventListener('DOMContentLoaded', function() {
     // --- 1. Tab 切換邏輯 ---
     const tabs = document.querySelectorAll('.pm-tab');
@@ -29,30 +29,96 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- 3. 動態新增 SKU 與連動圖片顏色邏輯 ---
+    // --- 3. 動態新增 / 複製 SKU 與連動圖片顏色邏輯 ---
     const addSkuBtn = document.getElementById('addSkuBtn');
     const skuRows = document.getElementById('skuRows');
     
     if (addSkuBtn && skuRows) {
+        function cleanSkuRow(row) {
+            // 清掉變體 ID，避免更新舊資料
+            row.querySelectorAll('input[name="variant_id[]"]').forEach(function (input) {
+                input.value = '';
+            });
+            // 避免萬一有重複的 datalist id 被複製出來
+            row.querySelectorAll('datalist').forEach(function (list) {
+                list.remove();
+            });
+        }
+
+        function clearSkuInputs(row) {
+            row.querySelectorAll('input, select, textarea').forEach(function (input) {
+                if (input.type === 'checkbox' || input.type === 'radio') {
+                    input.checked = false;
+                    return;
+                }
+                if (input.name === 'variant_id[]') {
+                    input.value = '';
+                    return;
+                }
+                input.value = '';
+            });
+        }
+
+        function copySkuInputs(sourceRow, targetRow) {
+            const sourceInputs = sourceRow.querySelectorAll('input, select, textarea');
+            const targetInputs = targetRow.querySelectorAll('input, select, textarea');
+
+            sourceInputs.forEach(function (sourceInput, idx) {
+                const targetInput = targetInputs[idx];
+                if (!targetInput) {
+                    return;
+                }
+                // 變體 ID 絕對不能複製
+                if (targetInput.name === 'variant_id[]') {
+                    targetInput.value = '';
+                    return;
+                }
+                
+                // 💡 依照你的要求：複製時不複製「尺寸」與「顏色」，強制清空讓它恢復預設
+                if (targetInput.name === 'size_inches[]' || targetInput.name === 'color[]') {
+                    targetInput.value = '';
+                    return;
+                }
+
+                if (targetInput.type === 'checkbox' || targetInput.type === 'radio') {
+                    targetInput.checked = sourceInput.checked;
+                    return;
+                }
+                targetInput.value = sourceInput.value;
+            });
+        }
+
         addSkuBtn.addEventListener('click', function () {
-            const row = document.createElement('div');
-            row.className = 'pm-sku-row';
-            row.innerHTML =
-                '<div class="pm-grid">' +
-                    '<div class="pm-col-3"><label>尺寸</label><input class="pm-input" type="text" name="size_inches[]" list="size-list" required placeholder="請選擇或輸入尺寸"></div>' +
-                    '<div class="pm-col-3"><label>顏色</label><input class="pm-input sku-color-input" type="text" name="color[]" placeholder="例如：消光黑"></div>' +
-                    '<div class="pm-col-3"><label>原價 (NT$)</label><input class="pm-input" type="number" name="original_price[]" min="0" step="1" required placeholder="0"></div>' +
-                    '<div class="pm-col-3"><label>特價 (NT$)</label><input class="pm-input" type="number" name="special_price[]" min="0" step="1" placeholder="可留空"></div>' +
-                    '<div class="pm-col-3"><label>會員價 (NT$)</label><input class="pm-input" type="number" name="member_price[]" min="0" step="1" required placeholder="0"></div>' +
-                    '<div class="pm-col-3"><label>庫存數量</label><input class="pm-input" type="number" name="stock[]" min="0" step="1" required placeholder="0"></div>' +
-                '</div>' +
-                '<div style="text-align:right; margin-top:10px;">' +
-                    '<button type="button" class="pm-btn pm-btn-danger pm-btn-sm remove-sku">移除此規格</button>' +
-                '</div>';
-            skuRows.appendChild(row);
+            const templateRow = skuRows.querySelector('.pm-sku-row:last-child') || skuRows.querySelector('.pm-sku-row');
+            if (!templateRow) {
+                return;
+            }
+            const newRow = templateRow.cloneNode(true);
+            cleanSkuRow(newRow);
+            clearSkuInputs(newRow);
+            skuRows.appendChild(newRow);
         });
 
         skuRows.addEventListener('click', function (event) {
+            if (event.target.classList.contains('copy-sku')) {
+                const sourceRow = event.target.closest('.pm-sku-row');
+                if (!sourceRow) {
+                    return;
+                }
+                const newRow = sourceRow.cloneNode(true);
+                cleanSkuRow(newRow);
+                copySkuInputs(sourceRow, newRow);
+                
+                // 強制解鎖輸入框，避免被瀏覽器 bug 鎖死
+                newRow.querySelectorAll('input, select, textarea').forEach(input => {
+                    input.readOnly = false;
+                    input.disabled = false;
+                });
+
+                sourceRow.after(newRow);
+                updateImageColorSelects();
+                return;
+            }
             if (!event.target.classList.contains('remove-sku')) {
                 return;
             }
@@ -117,7 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const colors = getAvailableColors();
             
             if (files.length > 0) {
-                console.log(`成功載入 ${files.length} 張圖片`); // 測試用，可在瀏覽器 F12 console 看到
+                console.log(`成功載入 ${files.length} 張圖片`);
             }
 
             Array.from(files).forEach((file, index) => {
