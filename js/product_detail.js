@@ -321,6 +321,9 @@ if (favoriteBtn && toast) {
         // 準備傳送給後端的資料
         const formData = new URLSearchParams();
         formData.append('action', 'toggle_favorite');
+        if (typeof csrfToken !== 'undefined') {
+            formData.append('csrf_token', csrfToken);
+        }
         if (typeof currentProductId !== 'undefined') {
             formData.append('product_id', currentProductId);
         }

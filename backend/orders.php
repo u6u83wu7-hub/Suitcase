@@ -194,6 +194,7 @@ if ($orderResult) {
         <div class="om-table-actions">
             <div class="om-bulk-left">
                 <form method="POST" action="backend_action.php" id="bulkOrdersForm">
+                    <?php echo apCsrfField(); ?>
                     <input type="hidden" name="action" value="bulk_update_orders">
                     <select class="pm-select" name="status" style="max-width:200px;">
                         <option value="">批次操作</option>
@@ -278,6 +279,7 @@ if ($orderResult) {
             $detail = $detailStmt->get_result()->fetch_assoc();
 
             $items = [];
+            $returnRequest = null;
             if ($detail) {
                 $itemStmt = $conn->prepare("
                     SELECT product_name, sku_code, color, size_inches, quantity, locked_price
@@ -290,6 +292,24 @@ if ($orderResult) {
                 $itemResult = $itemStmt->get_result();
                 while ($row = $itemResult->fetch_assoc()) {
                     $items[] = $row;
+                }
+
+                $returnTableRes = $conn->query("SHOW TABLES LIKE 'return_requests'");
+                if ($returnTableRes && $returnTableRes->num_rows > 0) {
+                    $returnStmt = $conn->prepare("
+                        SELECT rr.*, u.name AS requester_name, u.email AS requester_email
+                        FROM return_requests rr
+                        LEFT JOIN users u ON u.user_id = rr.user_id
+                        WHERE rr.order_id = ?
+                        ORDER BY rr.created_at DESC, rr.return_id DESC
+                        LIMIT 1
+                    ");
+                    if ($returnStmt) {
+                        $returnStmt->bind_param("i", $selectedOrderId);
+                        $returnStmt->execute();
+                        $returnRequest = $returnStmt->get_result()->fetch_assoc();
+                        $returnStmt->close();
+                    }
                 }
             }
             ?>
@@ -369,6 +389,7 @@ if ($orderResult) {
                 <div style="margin-top:18px;">
                     <h3 class="om-section-title">狀態更新 / 物流資訊</h3>
                     <form action="backend_action.php" method="POST">
+                        <?php echo apCsrfField(); ?>
                         <input type="hidden" name="action" value="update_order_status">
                         <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
                         <div class="pm-grid">
@@ -399,9 +420,48 @@ if ($orderResult) {
                     </form>
                 </div>
 
+                <?php if ($returnRequest): ?>
+                    <div style="margin-top:18px; padding:16px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
+                        <h3 class="om-section-title">退貨申請審核</h3>
+                        <dl class="om-kv">
+                            <dt>申請人</dt><dd><?php echo h(($returnRequest['requester_name'] ?? '') ?: ($returnRequest['requester_email'] ?? '-')); ?></dd>
+                            <dt>目前狀態</dt><dd><?php echo h($returnRequest['status']); ?></dd>
+                            <dt>申請時間</dt><dd><?php echo h($returnRequest['created_at']); ?></dd>
+                            <dt>退貨原因</dt><dd><?php echo nl2br(h($returnRequest['reason'])); ?></dd>
+                            <?php if (!empty($returnRequest['admin_note'])): ?>
+                                <dt>審核備註</dt><dd><?php echo nl2br(h($returnRequest['admin_note'])); ?></dd>
+                            <?php endif; ?>
+                        </dl>
+                        <form action="backend_action.php" method="POST" style="margin-top:12px;">
+                            <?php echo apCsrfField(); ?>
+                            <input type="hidden" name="action" value="update_return_request">
+                            <input type="hidden" name="return_id" value="<?php echo intval($returnRequest['return_id']); ?>">
+                            <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
+                            <div class="pm-grid">
+                                <div class="pm-col-3">
+                                    <label for="return_status">退貨狀態</label>
+                                    <select class="pm-select" id="return_status" name="return_status">
+                                        <?php foreach (['PENDING', 'APPROVED', 'REJECTED', 'REFUNDED'] as $returnStatus): ?>
+                                            <option value="<?php echo h($returnStatus); ?>" <?php echo $returnRequest['status'] === $returnStatus ? 'selected' : ''; ?>><?php echo h($returnStatus); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="pm-col-9">
+                                    <label for="return_admin_note">審核備註</label>
+                                    <input class="pm-input" type="text" id="return_admin_note" name="admin_note" value="<?php echo h($returnRequest['admin_note'] ?? ''); ?>" placeholder="例如：同意退貨，請保留外箱並等待客服通知。">
+                                </div>
+                                <div class="pm-col-12">
+                                    <button class="pm-btn pm-btn-main" type="submit">更新退貨狀態</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                <?php endif; ?>
+
                 <div style="margin-top:18px; padding-top:18px; border-top:1px solid #e2e8f0;">
                     <h3 class="om-section-title">危險區域</h3>
                     <form action="backend_action.php" method="POST" id="deleteOrderForm" style="display:flex; gap:10px; align-items:center;">
+                        <?php echo apCsrfField(); ?>
                         <input type="hidden" name="action" value="delete_order">
                         <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
                         <label for="delete_older_days" style="margin:0;">此訂單已完成超過 (天)：</label>

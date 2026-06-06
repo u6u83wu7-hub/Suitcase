@@ -161,10 +161,10 @@ if (isset($conn) && $conn instanceof mysqli && !$conn->connect_error) {
             <div class="header-left"></div>
             <a href="index.php" class="header-center" aria-label="回首頁">All Pass</a>
             <div class="header-right">
-                <div class="search-box">
-                    <input type="text" placeholder="Search...">
-                    <button>🔍</button>
-                </div>
+                <form class="search-box" action="search.php" method="GET">
+                    <input type="text" name="q" value="<?php echo htmlspecialchars($_GET['q'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" placeholder="Search...">
+                    <button type="submit">⌕</button>
+                </form>
 
                 <?php if (isset($_SESSION['user_id'])): ?>
                     <div class="dropdown icon-dropdown icon-btn" style="padding-bottom: 10px; margin-bottom: -10px;">

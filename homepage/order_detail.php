@@ -6,6 +6,8 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+require_once __DIR__ . '/includes/security.php';
+
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
     exit;
@@ -73,6 +75,9 @@ function odTableColumns($conn, $tableName) {
 
 $order = null;
 $orderItems = [];
+$returnNotice = '';
+$returnNoticeType = 'success';
+$returnRequest = null;
 
 if (odTableExists($conn, 'orders')) {
     $safeOrderNumber = $conn->real_escape_string($orderNumber);
@@ -95,6 +100,65 @@ $hasUnitPrice = in_array('unit_price', $orderItemColumns, true);
 $hasSubtotalAmount = in_array('subtotal_amount', $orderItemColumns, true);
 $hasLockedPrice = in_array('locked_price', $orderItemColumns, true);
 $hasVariantName = in_array('variant_name', $orderItemColumns, true);
+
+if ($order && odTableExists($conn, 'return_requests')) {
+    $orderId = (int)$order['order_id'];
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'request_return') {
+        if (!apValidateCsrf($_POST['csrf_token'] ?? null)) {
+            $returnNotice = '表單驗證失敗，請重新操作。';
+            $returnNoticeType = 'error';
+        } elseif (!in_array((string)$order['status'], ['DELIVERED', 'COMPLETED'], true)) {
+            $returnNotice = '只有已送達或已完成的訂單可以申請退貨。';
+            $returnNoticeType = 'error';
+        } else {
+            $existingStmt = $conn->prepare("SELECT return_id FROM return_requests WHERE order_id = ? AND status IN ('PENDING', 'APPROVED') LIMIT 1");
+            $existingReturnId = 0;
+            if ($existingStmt) {
+                $existingStmt->bind_param('i', $orderId);
+                $existingStmt->execute();
+                $existingRow = $existingStmt->get_result()->fetch_assoc();
+                $existingReturnId = $existingRow ? (int)$existingRow['return_id'] : 0;
+                $existingStmt->close();
+            }
+
+            if ($existingReturnId > 0) {
+                $returnNotice = '此訂單已有處理中的退貨申請。';
+                $returnNoticeType = 'error';
+            } else {
+                $reason = trim((string)($_POST['reason'] ?? ''));
+                if ($reason === '') {
+                    $returnNotice = '請填寫退貨原因。';
+                    $returnNoticeType = 'error';
+                } else {
+                    $insertStmt = $conn->prepare(
+                        "INSERT INTO return_requests (order_id, user_id, reason, status, created_at, updated_at)
+                         VALUES (?, ?, ?, 'PENDING', NOW(), NOW())"
+                    );
+                    if ($insertStmt) {
+                        $insertStmt->bind_param('iis', $orderId, $userId, $reason);
+                        if ($insertStmt->execute()) {
+                            $returnNotice = '退貨申請已送出，客服將於後台審核。';
+                            $returnNoticeType = 'success';
+                        } else {
+                            $returnNotice = '退貨申請送出失敗，請稍後再試。';
+                            $returnNoticeType = 'error';
+                        }
+                        $insertStmt->close();
+                    }
+                }
+            }
+        }
+    }
+
+    $returnStmt = $conn->prepare('SELECT * FROM return_requests WHERE order_id = ? ORDER BY created_at DESC, return_id DESC LIMIT 1');
+    if ($returnStmt) {
+        $returnStmt->bind_param('i', $orderId);
+        $returnStmt->execute();
+        $returnRequest = $returnStmt->get_result()->fetch_assoc();
+        $returnStmt->close();
+    }
+}
 
 include 'header.php';
 ?>
@@ -160,6 +224,40 @@ include 'header.php';
             <div><strong>優惠折扣：</strong>NT$ <?php echo number_format($discountAmount); ?></div>
             <div><strong>優惠後總額：</strong>NT$ <?php echo number_format($discountedTotal); ?></div>
         </div>
+
+        <?php if (odTableExists($conn, 'return_requests')): ?>
+            <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px; margin-bottom:18px; line-height:1.8; color:#444;">
+                <h2 style="font-size:20px; margin:0 0 12px; color:#222;">退貨申請</h2>
+                <?php if ($returnNotice !== ''): ?>
+                    <div style="padding:10px 12px; border-radius:8px; margin-bottom:12px; background:<?php echo $returnNoticeType === 'success' ? '#f0fdf4' : '#fef2f2'; ?>; color:<?php echo $returnNoticeType === 'success' ? '#166534' : '#991b1b'; ?>;">
+                        <?php echo htmlspecialchars($returnNotice); ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($returnRequest): ?>
+                    <div style="display:grid; gap:8px;">
+                        <div><strong>申請狀態：</strong><?php echo htmlspecialchars($returnRequest['status']); ?></div>
+                        <div><strong>申請時間：</strong><?php echo htmlspecialchars($returnRequest['created_at']); ?></div>
+                        <div><strong>退貨原因：</strong><?php echo nl2br(htmlspecialchars($returnRequest['reason'])); ?></div>
+                        <?php if (!empty($returnRequest['admin_note'])): ?>
+                            <div><strong>審核備註：</strong><?php echo nl2br(htmlspecialchars($returnRequest['admin_note'])); ?></div>
+                        <?php endif; ?>
+                    </div>
+                <?php elseif (in_array((string)$order['status'], ['DELIVERED', 'COMPLETED'], true)): ?>
+                    <form method="post" style="display:grid; gap:12px;">
+                        <?php echo apCsrfField(); ?>
+                        <input type="hidden" name="action" value="request_return">
+                        <label style="display:grid; gap:6px; font-weight:700;">
+                            退貨原因
+                            <textarea name="reason" rows="4" maxlength="1000" required style="width:100%; border:1px solid #ddd; border-radius:8px; padding:10px; font:inherit;" placeholder="請描述退貨原因、商品狀況或需要客服協助的內容"></textarea>
+                        </label>
+                        <button type="submit" style="justify-self:start; border:0; border-radius:999px; padding:10px 18px; background:#111; color:#fff; font-weight:800; cursor:pointer;">送出退貨申請</button>
+                    </form>
+                <?php else: ?>
+                    <p style="margin:0; color:#666;">訂單送達或完成後即可在這裡申請退貨。</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
         <div style="overflow:auto; border:1px solid #eee; border-radius:14px;">
             <table style="width:100%; border-collapse:collapse; min-width:760px;">

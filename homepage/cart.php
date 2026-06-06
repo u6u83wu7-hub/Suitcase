@@ -64,7 +64,15 @@ if (cartTableExists($conn, 'cart_items')) {
         $quantities = isset($_POST['quantities']) && is_array($_POST['quantities']) ? $_POST['quantities'] : [];
         $stmt = $conn->prepare('UPDATE cart_items SET quantity = ? WHERE cart_item_id = ? AND user_id = ?');
         $deleteStmt = $conn->prepare('DELETE FROM cart_items WHERE cart_item_id = ? AND user_id = ?');
-        if ($stmt && $deleteStmt) {
+        $stockStmt = $conn->prepare(
+            'SELECT COALESCE(v.stock_available, 0) AS stock_available
+             FROM cart_items ci
+             LEFT JOIN product_variants v ON v.variant_id = ci.variant_id
+             WHERE ci.cart_item_id = ? AND ci.user_id = ?
+             LIMIT 1'
+        );
+        $stockErrors = [];
+        if ($stmt && $deleteStmt && $stockStmt) {
             foreach ($quantities as $cartItemId => $qtyValue) {
                 $cartItemId = intval($cartItemId);
                 $quantity = intval($qtyValue);
@@ -72,6 +80,14 @@ if (cartTableExists($conn, 'cart_items')) {
                     $deleteStmt->bind_param('ii', $cartItemId, $userId);
                     $deleteStmt->execute();
                 } else {
+                    $stockStmt->bind_param('ii', $cartItemId, $userId);
+                    $stockStmt->execute();
+                    $stockRow = $stockStmt->get_result()->fetch_assoc();
+                    $stockAvailable = $stockRow ? intval($stockRow['stock_available']) : 0;
+                    if ($quantity > $stockAvailable) {
+                        $stockErrors[] = $cartItemId;
+                        continue;
+                    }
                     $stmt->bind_param('iii', $quantity, $cartItemId, $userId);
                     $stmt->execute();
                 }
@@ -83,7 +99,10 @@ if (cartTableExists($conn, 'cart_items')) {
         if ($deleteStmt) {
             $deleteStmt->close();
         }
-        header('Location: cart.php?notice=updated');
+        if ($stockStmt) {
+            $stockStmt->close();
+        }
+        header('Location: cart.php?notice=' . (empty($stockErrors) ? 'updated' : 'stock_limited'));
         exit;
     }
 }
@@ -177,6 +196,10 @@ include 'header.php';
         <div style="margin-bottom:16px; padding:12px 14px; border-radius:10px; background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">已刪除該筆購物車資料。</div>
     <?php elseif ($notice === 'updated'): ?>
         <div style="margin-bottom:16px; padding:12px 14px; border-radius:10px; background:#ecfdf5; color:#166534; border:1px solid #86efac;">購物車已更新。</div>
+    <?php endif; ?>
+
+    <?php if ($notice === 'stock_limited'): ?>
+        <div style="margin-bottom:16px; padding:12px 14px; border-radius:10px; background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">部分商品數量超過庫存，已保留原數量，請調整後再結帳。</div>
     <?php endif; ?>
 
     <?php if (!cartTableExists($conn, 'cart_items')): ?>

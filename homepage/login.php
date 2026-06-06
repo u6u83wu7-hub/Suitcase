@@ -6,6 +6,52 @@ apConfigureErrorHandling();
 
 $error_message = "";
 
+function loginTableExists($conn, $tableName) {
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function loginClientIp() {
+    return substr((string)($_SERVER['REMOTE_ADDR'] ?? 'CLI'), 0, 45);
+}
+
+function loginRecordAttempt($conn, $identifier, $success) {
+    if (!loginTableExists($conn, 'security_attempts')) {
+        return;
+    }
+    $scope = 'login';
+    $ip = loginClientIp();
+    $successInt = $success ? 1 : 0;
+    $stmt = $conn->prepare('INSERT INTO security_attempts (scope, identifier, ip_address, success) VALUES (?, ?, ?, ?)');
+    if ($stmt) {
+        $stmt->bind_param('sssi', $scope, $identifier, $ip, $successInt);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
+function loginTooManyAttempts($conn, $identifier) {
+    if (!loginTableExists($conn, 'security_attempts')) {
+        return false;
+    }
+    $scope = 'login';
+    $minutes = 15;
+    $stmt = $conn->prepare(
+        "SELECT COUNT(*) AS attempts
+         FROM security_attempts
+         WHERE scope = ? AND identifier = ? AND success = 0 AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)"
+    );
+    if (!$stmt) {
+        return false;
+    }
+    $stmt->bind_param('ssi', $scope, $identifier, $minutes);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return (int)($row['attempts'] ?? 0) >= 8;
+}
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (!apValidateCsrf()) {
         $error_message = "表單驗證失敗，請重新送出。";
@@ -14,20 +60,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($conn->connect_error) die("資料庫連線失敗: " . $conn->connect_error);
     $conn->set_charset("utf8mb4");
 
-    $email = trim($_POST['email']);
+    $email = strtolower(trim($_POST['email']));
     $password = $_POST['password'];
+    $loginIdentifier = $email !== '' ? $email : loginClientIp();
 
     // 🛡️ 嚴格防護 A：限制長度，防止塞爆伺服器
-    if (strlen($email) > 100 || strlen($password) > 255) {
+    if (loginTooManyAttempts($conn, $loginIdentifier)) {
+        $error_message = "登入嘗試次數過多，請 15 分鐘後再試。";
+    } elseif (strlen($email) > 100 || strlen($password) > 255) {
+        loginRecordAttempt($conn, $loginIdentifier, false);
         $error_message = "輸入長度異常，請停止你的駭客行為！";
     } 
     // 🛡️ 嚴格防護 B：驗證 Email 格式是否真的長得像 Email
     elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        loginRecordAttempt($conn, $loginIdentifier, false);
         $error_message = "請輸入正確的電子郵件格式！";
     } 
     else {
         // 只去一般消費者的 users 表格找 (防 SQL 注入的預備語句)
-        $stmt = $conn->prepare("SELECT user_id, name, password_hash FROM users WHERE email = ?");
+        $stmt = $conn->prepare("SELECT user_id, name, password_hash, status FROM users WHERE email = ?");
         $stmt->bind_param("s", $email);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -35,7 +86,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows > 0) {
             $row = $result->fetch_assoc();
             
-            if (password_verify($password, $row['password_hash'])) {
+            if (strtoupper((string)($row['status'] ?? 'ACTIVE')) !== 'ACTIVE') {
+                loginRecordAttempt($conn, $loginIdentifier, false);
+                $error_message = "此會員帳號目前未啟用，請聯繫客服。";
+            } elseif (password_verify($password, $row['password_hash'])) {
+                loginRecordAttempt($conn, $loginIdentifier, true);
+                session_regenerate_id(true);
                 // 登入成功！存入 Session
                 $_SESSION['user_id'] = $row['user_id'];
                 $_SESSION['user_name'] = $row['name'];
@@ -44,9 +100,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 header("Location: index.php"); 
                 exit();
             } else {
+                loginRecordAttempt($conn, $loginIdentifier, false);
                 $error_message = "密碼錯誤，請再試一次！";
             }
         } else {
+            loginRecordAttempt($conn, $loginIdentifier, false);
             $error_message = "找不到此帳號，請先前往註冊！";
         }
         $stmt->close();

@@ -435,6 +435,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $orderId = intval($conn->insert_id);
             $orderStmt->close();
 
+            if (checkoutTableExists($conn, 'payment_transactions')) {
+                $paymentStatus = 'SUCCESS';
+                $transactionNo = 'SIM-' . $orderNumber . '-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
+                $paymentStmt = $conn->prepare('INSERT INTO payment_transactions (order_id, amount, payment_method, status, transaction_no) VALUES (?, ?, ?, ?, ?)');
+                if (!$paymentStmt) {
+                    throw new RuntimeException('建立付款交易紀錄失敗。');
+                }
+                $paymentStmt->bind_param('idsss', $orderId, $grandTotal, $paymentMethod, $paymentStatus, $transactionNo);
+                if (!$paymentStmt->execute()) {
+                    throw new RuntimeException('建立付款交易紀錄失敗。');
+                }
+                $paymentStmt->close();
+            }
+
             $itemColumns = ['order_id'];
             $itemPlaceholders = ['?'];
             $itemTypes = 'i';

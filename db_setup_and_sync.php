@@ -309,6 +309,7 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `user_id` INT NOT NULL,
     `subtotal_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `shipping_fee` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `coupon_id` INT NULL,
     `discount_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `total_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     `status` ENUM('PENDING','PROCESSING','SHIPPED','DELIVERED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'PENDING',
@@ -325,6 +326,7 @@ $sql_orders = "CREATE TABLE IF NOT EXISTS `orders` (
     `inventory_deducted` TINYINT(1) NOT NULL DEFAULT 0,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_orders_user_id` (`user_id`),
+    INDEX `idx_orders_coupon_id` (`coupon_id`),
     INDEX `idx_orders_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_orders);
@@ -342,6 +344,12 @@ if ($statusColRes && $statusColRes->num_rows > 0) {
 
 if (!columnExists($conn, 'orders', 'order_number')) {
     $conn->query("ALTER TABLE `orders` ADD COLUMN `order_number` VARCHAR(50) NULL AFTER `order_id`");
+}
+if (!columnExists($conn, 'orders', 'coupon_id')) {
+    $conn->query("ALTER TABLE `orders` ADD COLUMN `coupon_id` INT NULL AFTER `shipping_fee`");
+}
+if (!indexExists($conn, 'orders', 'idx_orders_coupon_id')) {
+    $conn->query("ALTER TABLE `orders` ADD INDEX `idx_orders_coupon_id` (`coupon_id`)");
 }
 if (!columnExists($conn, 'orders', 'cardholder_name')) {
     $conn->query("ALTER TABLE `orders` ADD COLUMN `cardholder_name` VARCHAR(100) NULL AFTER `payment_method`");
@@ -682,6 +690,89 @@ if (!columnExists($conn, 'orders', 'tracking_number')) {
 if (!columnExists($conn, 'orders', 'admin_notes')) {
     $conn->query("ALTER TABLE `orders` ADD COLUMN `admin_notes` TEXT NULL AFTER `tracking_number`");
 }
+
+$sql_password_reset_tokens = "CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
+    `reset_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT NOT NULL,
+    `token_hash` CHAR(64) NOT NULL,
+    `expires_at` DATETIME NOT NULL,
+    `used_at` DATETIME NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_password_reset_user` (`user_id`),
+    INDEX `idx_password_reset_token` (`token_hash`),
+    INDEX `idx_password_reset_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_password_reset_tokens);
+
+$sql_security_attempts = "CREATE TABLE IF NOT EXISTS `security_attempts` (
+    `attempt_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `scope` VARCHAR(40) NOT NULL,
+    `identifier` VARCHAR(190) NOT NULL,
+    `ip_address` VARCHAR(45) NULL,
+    `success` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_security_attempts_scope_identifier` (`scope`, `identifier`, `created_at`),
+    INDEX `idx_security_attempts_ip` (`ip_address`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_security_attempts);
+
+$sql_payment_transactions = "CREATE TABLE IF NOT EXISTS `payment_transactions` (
+    `payment_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_id` INT NOT NULL,
+    `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    `payment_method` VARCHAR(50) NOT NULL DEFAULT 'credit_card',
+    `status` VARCHAR(30) NOT NULL DEFAULT 'SUCCESS',
+    `transaction_no` VARCHAR(80) NULL,
+    `failure_reason` VARCHAR(255) NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_payment_transactions_order` (`order_id`),
+    INDEX `idx_payment_transactions_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_payment_transactions);
+
+$sql_return_requests = "CREATE TABLE IF NOT EXISTS `return_requests` (
+    `return_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `order_id` INT NOT NULL,
+    `user_id` INT NOT NULL,
+    `reason` VARCHAR(255) NOT NULL,
+    `status` VARCHAR(30) NOT NULL DEFAULT 'REQUESTED',
+    `admin_note` TEXT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_return_requests_order` (`order_id`),
+    INDEX `idx_return_requests_user` (`user_id`),
+    INDEX `idx_return_requests_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_return_requests);
+
+$sql_product_reviews = "CREATE TABLE IF NOT EXISTS `product_reviews` (
+    `review_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `product_id` INT NOT NULL,
+    `user_id` INT NOT NULL,
+    `order_id` INT NOT NULL,
+    `rating` TINYINT NOT NULL,
+    `comment` TEXT NULL,
+    `is_visible` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_product_review_order_user` (`product_id`, `user_id`, `order_id`),
+    INDEX `idx_product_reviews_product` (`product_id`),
+    INDEX `idx_product_reviews_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_product_reviews);
+
+$sql_admin_audit_logs = "CREATE TABLE IF NOT EXISTS `admin_audit_logs` (
+    `log_id` INT AUTO_INCREMENT PRIMARY KEY,
+    `admin_id` INT NULL,
+    `action` VARCHAR(80) NOT NULL,
+    `target_type` VARCHAR(60) NULL,
+    `target_id` INT NULL,
+    `message` TEXT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_admin_audit_logs_admin` (`admin_id`),
+    INDEX `idx_admin_audit_logs_action` (`action`),
+    INDEX `idx_admin_audit_logs_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_admin_audit_logs);
 
 $sql_links = "CREATE TABLE IF NOT EXISTS `product_category_links` (
     `product_id` INT NOT NULL,
