@@ -86,6 +86,8 @@ if (!empty($_POST['new_category_name'])) {
 $isFeatured = boolPost('is_featured') ? 1 : 0;
 $description = isset($_POST['description']) ? trim($_POST['description']) : '';
 $warrantyInfo = isset($_POST['warranty_info']) ? trim($_POST['warranty_info']) : '';
+// 💡 取得廠商 ID (如果未選擇則為 null)
+$supplierId = isset($_POST['supplier_id']) && $_POST['supplier_id'] !== '' ? intval($_POST['supplier_id']) : null;
 
 $conn->begin_transaction();
 
@@ -104,6 +106,13 @@ try {
     $setCols = ['name = ?', 'is_featured = ?'];
     $bindTypes = 'si';
     $bindVals = [$name, $isFeatured];
+
+    // 💡 新增：將廠商 ID 寫入更新陣列
+    if (in_array('supplier_id', $productColumns, true)) {
+        $setCols[] = 'supplier_id = ?';
+        $bindTypes .= 's'; // 使用 's' 允許寫入 null 值
+        $bindVals[] = $supplierId;
+    }
 
     if (in_array('description', $productColumns, true)) {
         $setCols[] = 'description = ?';
@@ -277,7 +286,7 @@ try {
         }
     }
 
-    // 👇 修改點 2：更新既有圖片顏色 (修復空值存入變成 0 的問題)
+    // 👇 更新既有圖片顏色 (修復空值存入變成 0 的問題)
     if (in_array('color', $imageColumns, true) && isset($_POST['existing_image_color']) && is_array($_POST['existing_image_color'])) {
         foreach ($_POST['existing_image_color'] as $imgId => $colorVal) {
             $imgId = intval($imgId);

@@ -1,5 +1,5 @@
 // products.js - 商品管理模組的所有交互邏輯
-//版本1
+//版本3 (恢復下拉選單，複製時清空尺寸與顏色)
 document.addEventListener('DOMContentLoaded', function() {
     // --- 1. Tab 切換邏輯 ---
     const tabs = document.querySelectorAll('.pm-tab');
@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
             row.querySelectorAll('input[name="variant_id[]"]').forEach(function (input) {
                 input.value = '';
             });
-            // 避免重複 datalist id
+            // 避免萬一有重複的 datalist id 被複製出來
             row.querySelectorAll('datalist').forEach(function (list) {
                 list.remove();
             });
@@ -68,14 +68,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!targetInput) {
                     return;
                 }
+                // 變體 ID 絕對不能複製
                 if (targetInput.name === 'variant_id[]') {
                     targetInput.value = '';
                     return;
                 }
+                
+                // 💡 依照你的要求：複製時不複製「尺寸」與「顏色」，強制清空讓它恢復預設
                 if (targetInput.name === 'size_inches[]' || targetInput.name === 'color[]') {
                     targetInput.value = '';
                     return;
                 }
+
                 if (targetInput.type === 'checkbox' || targetInput.type === 'radio') {
                     targetInput.checked = sourceInput.checked;
                     return;
@@ -104,6 +108,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const newRow = sourceRow.cloneNode(true);
                 cleanSkuRow(newRow);
                 copySkuInputs(sourceRow, newRow);
+                
+                // 強制解鎖輸入框，避免被瀏覽器 bug 鎖死
+                newRow.querySelectorAll('input, select, textarea').forEach(input => {
+                    input.readOnly = false;
+                    input.disabled = false;
+                });
+
                 sourceRow.after(newRow);
                 updateImageColorSelects();
                 return;
@@ -172,7 +183,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const colors = getAvailableColors();
             
             if (files.length > 0) {
-                console.log(`成功載入 ${files.length} 張圖片`); // 測試用，可在瀏覽器 F12 console 看到
+                console.log(`成功載入 ${files.length} 張圖片`);
             }
 
             Array.from(files).forEach((file, index) => {

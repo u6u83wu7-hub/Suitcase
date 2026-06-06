@@ -95,6 +95,10 @@ require_once __DIR__ . '/../auth_guard.php';
                             <input class="pm-input" type="number" name="stock[]" min="0" step="1" required placeholder="0">
                         </div>
                     </div>
+                    <div style="text-align:right; margin-top:10px; display:flex; justify-content:flex-end; gap:8px;">
+                        <button type="button" class="pm-btn pm-btn-sm copy-sku" style="background-color: #64748b; color: white; border: none;">複製此規格</button>
+                        <button type="button" class="pm-btn pm-btn-danger pm-btn-sm remove-sku">移除此規格</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -134,4 +138,3 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-
