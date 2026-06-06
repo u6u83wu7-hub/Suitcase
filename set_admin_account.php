@@ -1,4 +1,5 @@
 <?php
+// set_admin_account.php(06/06)
 // 1. 設定資料庫連線資訊
 $conn = new mysqli("localhost", "root", "", "all_pass_db");
 
