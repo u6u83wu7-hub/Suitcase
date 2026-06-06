@@ -62,6 +62,17 @@ if (!function_exists('sfCategoryUrl')) {
     }
 }
 
+if (!function_exists('sfPublicFileExists')) {
+    function sfPublicFileExists($relativePath) {
+        $relativePath = ltrim((string)$relativePath, '/\\');
+        if ($relativePath === '' || strpos($relativePath, '..') !== false) {
+            return false;
+        }
+
+        return is_file(dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $relativePath));
+    }
+}
+
 if (!function_exists('sfFetchCategories')) {
     function sfFetchCategories($conn) {
         $categories = [];
@@ -96,6 +107,7 @@ if (!function_exists('sfFetchHomepageBanners')) {
             SELECT
                 pb.promotion_id,
                 pb.banner_image_url,
+                p.promotion_image_url,
                 p.name,
                 p.description,
                 p.start_at,
@@ -111,6 +123,11 @@ if (!function_exists('sfFetchHomepageBanners')) {
         $res = $conn->query($sql);
         if ($res) {
             while ($row = $res->fetch_assoc()) {
+                if (!sfPublicFileExists($row['banner_image_url'])) {
+                    $row['banner_image_url'] = sfPublicFileExists($row['promotion_image_url'])
+                        ? $row['promotion_image_url']
+                        : '';
+                }
                 $banners[] = $row;
             }
         }
