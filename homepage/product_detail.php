@@ -59,6 +59,41 @@ if ($conn->connect_error) {
 $conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);
 
+// 💡 處理前端 AJAX 發送的「加入/移除收藏愛心」請求
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'toggle_favorite') {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['user_id'])) {
+        echo json_encode(['success' => false, 'error' => '請先登入']);
+        exit;
+    }
+    $userId = intval($_SESSION['user_id']);
+    $favProductId = intval($_POST['product_id'] ?? 0);
+
+    if ($favProductId > 0) {
+        $checkFav = $conn->prepare("SELECT favorite_id FROM user_favorites WHERE user_id = ? AND product_id = ?");
+        $checkFav->bind_param("ii", $userId, $favProductId);
+        $checkFav->execute();
+        $res = $checkFav->get_result();
+
+        if ($res->num_rows > 0) {
+            // 已存在則移除
+            $delFav = $conn->prepare("DELETE FROM user_favorites WHERE user_id = ? AND product_id = ?");
+            $delFav->bind_param("ii", $userId, $favProductId);
+            $delFav->execute();
+            echo json_encode(['success' => true, 'status' => 'removed']);
+        } else {
+            // 不存在則新增
+            $addFav = $conn->prepare("INSERT INTO user_favorites (user_id, product_id) VALUES (?, ?)");
+            $addFav->bind_param("ii", $userId, $favProductId);
+            $addFav->execute();
+            echo json_encode(['success' => true, 'status' => 'added']);
+        }
+        exit;
+    }
+    echo json_encode(['success' => false, 'error' => '商品無效']);
+    exit;
+}
+
 if (!empty($_SESSION['user_id'])) {
     $currentUserId = intval($_SESSION['user_id']);
     $membershipSql = 'SELECT membership_level FROM users WHERE user_id = ' . $currentUserId . ' LIMIT 1';
@@ -148,6 +183,18 @@ if (!$prodRes || $prodRes->num_rows === 0) {
     exit;
 }
 $product = $prodRes->fetch_assoc();
+
+// 💡 取得「初始收藏狀態」，以便渲染愛心顏色
+$isFavorited = false;
+if (!empty($_SESSION['user_id'])) {
+    $favChk = $conn->prepare("SELECT favorite_id FROM user_favorites WHERE user_id = ? AND product_id = ?");
+    $favChk->bind_param("ii", $_SESSION['user_id'], $id);
+    $favChk->execute();
+    if ($favChk->get_result()->num_rows > 0) {
+        $isFavorited = true;
+    }
+    $favChk->close();
+}
 
 // 圖片
 $imgs = [];
@@ -459,6 +506,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
 
         if ($ok) {
+            // 💡 如果是點擊「直接下單」，加入購物車成功後直接跳轉購物車頁面
+            if (isset($_POST['buy_now']) && $_POST['buy_now'] === '1') {
+                header('Location: cart.php');
+                exit;
+            }
+
             if ($alreadyInCart) {
                 $cartNotice = '購物車已有該筆商品，已幫你更新數量，請前往購物車修改。';
             } else {
@@ -598,27 +651,50 @@ include 'header.php';
 <main class="detail-page">
     <a href="index.php" class="back-link">回首頁</a>
     <section class="detail-wrap">
-        <div class="detail-gallery">
-            <?php if (!empty($imgs)): ?>
-                <img id="mainImg" class="detail-main-image" src="<?php echo htmlspecialchars($defaultImageUrl !== '' ? $defaultImageUrl : '../' . ltrim($imgs[0]['image_url'], '/')); ?>" alt="<?php echo htmlspecialchars($product['name']); ?>">
-                <div id="thumbList" class="detail-thumbs">
-                    <?php foreach ($imgs as $im): ?>
-                        <?php
-                            $thumbSrc = '../' . ltrim($im['image_url'], '/');
-                            $thumbColor = isset($im['color']) ? trim((string)$im['color']) : '';
-                            $thumbMatchesDefault = ($defaultImageUrl !== '' && $thumbSrc === $defaultImageUrl);
-                        ?>
-                        <img
-                            src="<?php echo htmlspecialchars($thumbSrc); ?>"
-                            alt="<?php echo htmlspecialchars($im['alt_text'] ?? $product['name']); ?>"
-                            data-image-url="<?php echo htmlspecialchars($thumbSrc); ?>"
-                            data-color="<?php echo htmlspecialchars($thumbColor); ?>"
-                            data-is-default="<?php echo $thumbMatchesDefault ? '1' : '0'; ?>"
-                        >
-                    <?php endforeach; ?>
-                </div>
-            <?php else: ?>
-                <div class="detail-image-placeholder">暫無圖片</div>
+        
+        <div class="detail-left-column">
+            <div class="detail-gallery">
+                <?php if (!empty($imgs)): ?>
+                    <img id="mainImg" class="detail-main-image" src="<?php echo htmlspecialchars($defaultImageUrl !== '' ? $defaultImageUrl : '../' . ltrim($imgs[0]['image_url'], '/')); ?>" alt="<?php echo htmlspecialchars($product['name']); ?>">
+                    <div id="thumbList" class="detail-thumbs">
+                        <?php foreach ($imgs as $im): ?>
+                            <?php
+                                $thumbSrc = '../' . ltrim($im['image_url'], '/');
+                                $thumbColor = isset($im['color']) ? trim((string)$im['color']) : '';
+                                $thumbMatchesDefault = ($defaultImageUrl !== '' && $thumbSrc === $defaultImageUrl);
+                            ?>
+                            <img
+                                src="<?php echo htmlspecialchars($thumbSrc); ?>"
+                                alt="<?php echo htmlspecialchars($im['alt_text'] ?? $product['name']); ?>"
+                                data-image-url="<?php echo htmlspecialchars($thumbSrc); ?>"
+                                data-color="<?php echo htmlspecialchars($thumbColor); ?>"
+                                data-is-default="<?php echo $thumbMatchesDefault ? '1' : '0'; ?>"
+                            >
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="detail-image-placeholder">暫無圖片</div>
+                <?php endif; ?>
+            </div>
+
+            <?php if (!empty($productFaqs)): ?>
+                <section class="detail-faq">
+                    <div class="detail-section-heading">
+                        <span>FAQ</span>
+                        <h2>常見問題</h2>
+                    </div>
+                    <div class="faq-list">
+                        <?php foreach ($productFaqs as $faq): ?>
+                            <details class="faq-item">
+                                <summary>
+                                    <span><?php echo htmlspecialchars($faq['question']); ?></span>
+                                    <small><?php echo intval($faq['product_id'] ?? 0) === $id ? '商品專屬' : '通用問題'; ?></small>
+                                </summary>
+                                <p><?php echo nl2br(htmlspecialchars($faq['answer'])); ?></p>
+                            </details>
+                        <?php endforeach; ?>
+                    </div>
+                </section>
             <?php endif; ?>
         </div>
         <div class="detail-info">
@@ -714,19 +790,25 @@ include 'header.php';
             <?php endif; ?>
 
             <form method="post" id="cartForm" class="detail-actions">
+                <?php echo apCsrfField(); ?>
                 <input type="hidden" name="action" value="add_to_cart">
                 <input type="hidden" name="variant_id" id="variantIdInput" value="<?php echo $defaultVariantId; ?>">
                 <input type="number" name="quantity" id="quantityInput" min="1" value="1" class="qty-input">
+                
                 <button type="submit" class="detail-btn">加入購物車</button>
-                <button type="button" class="ghost-btn favorite-btn" id="favoriteBtn" aria-pressed="false" aria-label="加入收藏">
+                <button type="submit" name="buy_now" value="1" class="detail-btn" style="background-color: var(--accent); border-color: var(--accent);">直接下單</button>
+                
+                <button type="button" class="ghost-btn favorite-btn <?php echo $isFavorited ? 'is-active' : ''; ?>" id="favoriteBtn" aria-pressed="<?php echo $isFavorited ? 'true' : 'false'; ?>" aria-label="加入收藏">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 21s-6.7-4.35-9.33-8.05C-0.2 9.6 1.2 5.6 4.6 4.4c2.2-.8 4.5 0 6 1.8 1.5-1.8 3.8-2.6 6-1.8 3.4 1.2 4.8 5.2 1.93 8.55C18.7 16.65 12 21 12 21z" />
                     </svg>
                 </button>
             </form>
+            
             <div class="sticky-actions">
                 <input type="number" id="quantityInputMobile" min="1" value="1" class="qty-input">
-                <button type="submit" form="cartForm" class="detail-btn">加入購物車</button>
+                <button type="submit" form="cartForm" class="detail-btn" style="padding: 10px;">加入購物車</button>
+                <button type="submit" form="cartForm" name="buy_now" value="1" class="detail-btn" style="padding: 10px; background-color: var(--accent); border-color: var(--accent);">直接下單</button>
             </div>
 
             <div class="detail-info-box">
@@ -761,25 +843,6 @@ include 'header.php';
                 </section>
             <?php endif; ?>
 
-            <?php if (!empty($productFaqs)): ?>
-                <section class="detail-faq">
-                    <div class="detail-section-heading">
-                        <span>FAQ</span>
-                        <h2>常見問題</h2>
-                    </div>
-                    <div class="faq-list">
-                        <?php foreach ($productFaqs as $faq): ?>
-                            <details class="faq-item">
-                                <summary>
-                                    <span><?php echo htmlspecialchars($faq['question']); ?></span>
-                                    <small><?php echo intval($faq['product_id'] ?? 0) === $id ? '商品專屬' : '通用問題'; ?></small>
-                                </summary>
-                                <p><?php echo nl2br(htmlspecialchars($faq['answer'])); ?></p>
-                            </details>
-                        <?php endforeach; ?>
-                    </div>
-                </section>
-            <?php endif; ?>
         </div>
     </section>
 
@@ -821,6 +884,8 @@ include 'header.php';
 <div id="toast" class="toast"></div>
 
 <script>
+    const isLoggedIn = <?php echo !empty($_SESSION['user_id']) ? 'true' : 'false'; ?>;
+    const currentProductId = <?php echo $id; ?>;
     const variantData = <?php echo json_encode($variantPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
     const isMemberUser = <?php echo $isMemberUser ? 'true' : 'false'; ?>;
     let globalSelectedColor = '<?php echo htmlspecialchars($defaultColor, ENT_QUOTES); ?>';
