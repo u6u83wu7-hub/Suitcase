@@ -110,6 +110,70 @@ $res = $conn->query("SELECT admin_id, role_id, username, status, created_at FROM
 if ($res) {
     while ($row = $res->fetch_assoc()) { $admins[] = $row; }
 }
+
+function sysTableExists($conn, $tableName) {
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function sysFetchRows($conn, $sql) {
+    $rows = [];
+    $res = $conn->query($sql);
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $rows[] = $row;
+        }
+    }
+    return $rows;
+}
+
+$lowStockRows = sysFetchRows($conn, "
+    SELECT p.product_id, p.name AS product_name, pv.variant_id, pv.sku_code, pv.color, pv.size_inches, pv.stock_available
+    FROM product_variants pv
+    JOIN products p ON p.product_id = pv.product_id
+    WHERE pv.stock_available <= 5
+    ORDER BY pv.stock_available ASC, p.product_id DESC
+    LIMIT 20
+");
+
+$inventoryLogRows = sysTableExists($conn, 'inventory_adjustment_logs')
+    ? sysFetchRows($conn, "
+        SELECT l.*, p.name AS product_name, au.username AS admin_username
+        FROM inventory_adjustment_logs l
+        LEFT JOIN products p ON p.product_id = l.product_id
+        LEFT JOIN admin_users au ON au.admin_id = l.admin_id
+        ORDER BY l.created_at DESC, l.log_id DESC
+        LIMIT 12
+    ")
+    : [];
+
+$securityAttemptRows = sysTableExists($conn, 'security_attempts')
+    ? sysFetchRows($conn, "
+        SELECT scope, identifier, ip_address, success, created_at
+        FROM security_attempts
+        ORDER BY created_at DESC, attempt_id DESC
+        LIMIT 12
+    ")
+    : [];
+
+$auditRows = sysTableExists($conn, 'admin_audit_logs')
+    ? sysFetchRows($conn, "
+        SELECT al.*, au.username AS admin_username
+        FROM admin_audit_logs al
+        LEFT JOIN admin_users au ON au.admin_id = al.admin_id
+        ORDER BY al.created_at DESC, al.log_id DESC
+        LIMIT 12
+    ")
+    : [];
+
+$pointRows = sysFetchRows($conn, "
+    SELECT user_id, name, email, points_balance
+    FROM users
+    WHERE points_balance > 0
+    ORDER BY points_balance DESC, user_id DESC
+    LIMIT 12
+");
 ?>
 
 <style>
@@ -137,6 +201,20 @@ if ($res) {
     .inline-form select { width: auto; padding: 6px 10px; margin: 0; font-size: 13px; }
     .inline-btn { padding: 6px 12px; background: #334155; color: #fff; font-size: 12px; border-radius: 4px; }
     .inline-btn:hover { background: #111827; }
+    .ops-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 24px; }
+    .ops-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; overflow: hidden; }
+    .ops-card h2 { margin: 0 0 12px; font-size: 16px; color: #1e293b; }
+    .ops-table-wrap { overflow-x: auto; }
+    .ops-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
+    .ops-table th { text-align: left; color: #64748b; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 9px 10px; }
+    .ops-table td { border-bottom: 1px solid #f1f5f9; padding: 10px; vertical-align: top; color: #334155; }
+    .ops-empty { padding: 18px; border-radius: 10px; background: #f8fafc; color: #64748b; font-size: 13px; }
+    .ops-badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; background: #eef2ff; color: #3730a3; }
+    .ops-badge.bad { background: #fef2f2; color: #991b1b; }
+    .ops-badge.good { background: #ecfdf5; color: #047857; }
+    @media (max-width: 1000px) {
+        .sys-layout, .ops-grid { grid-template-columns: 1fr; }
+    }
 </style>
 
 <h1 style="font-size:24px; margin-top:0; margin-bottom:4px;">⚙️ 系統與權限管理</h1>
@@ -244,6 +322,121 @@ if ($res) {
             <button type="submit" class="alt" style="width:100%; margin-top:8px;">確認配置並發送帳號</button>
         </form>
     </div>
+</div>
+
+<div class="ops-grid">
+    <section class="ops-card">
+        <h2>低庫存 SKU 監控</h2>
+        <?php if (!empty($lowStockRows)): ?>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead><tr><th>商品 / SKU</th><th>規格</th><th>可售庫存</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($lowStockRows as $row): ?>
+                            <tr>
+                                <td><strong>#<?php echo (int)$row['product_id']; ?> <?php echo htmlspecialchars($row['product_name']); ?></strong><br><span style="color:#64748b;"><?php echo htmlspecialchars($row['sku_code'] ?: '-'); ?></span></td>
+                                <td><?php echo htmlspecialchars(trim(($row['size_inches'] ?: '-') . ' / ' . ($row['color'] ?: '-'))); ?></td>
+                                <td><span class="ops-badge <?php echo (int)$row['stock_available'] <= 0 ? 'bad' : ''; ?>"><?php echo (int)$row['stock_available']; ?> 件</span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="ops-empty">目前沒有低庫存 SKU。</div>
+        <?php endif; ?>
+    </section>
+
+    <section class="ops-card">
+        <h2>近期庫存異動</h2>
+        <?php if (!empty($inventoryLogRows)): ?>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead><tr><th>時間</th><th>商品 / SKU</th><th>異動</th><th>操作</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($inventoryLogRows as $row): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['created_at']); ?></td>
+                                <td><strong><?php echo htmlspecialchars($row['product_name'] ?: ('#' . $row['product_id'])); ?></strong><br><span style="color:#64748b;"><?php echo htmlspecialchars($row['sku_code'] ?: '-'); ?></span></td>
+                                <td><?php echo (int)$row['old_stock']; ?> -> <?php echo (int)$row['new_stock']; ?> <span class="ops-badge <?php echo (int)$row['delta_quantity'] < 0 ? 'bad' : 'good'; ?>"><?php echo (int)$row['delta_quantity']; ?></span></td>
+                                <td><?php echo htmlspecialchars($row['action_type']); ?><br><span style="color:#64748b;"><?php echo htmlspecialchars($row['admin_username'] ?: '-'); ?></span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="ops-empty">目前沒有庫存異動紀錄。</div>
+        <?php endif; ?>
+    </section>
+
+    <section class="ops-card">
+        <h2>登入 / 密碼重設嘗試</h2>
+        <?php if (!empty($securityAttemptRows)): ?>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead><tr><th>時間</th><th>範圍</th><th>識別值</th><th>結果</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($securityAttemptRows as $row): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['created_at']); ?></td>
+                                <td><?php echo htmlspecialchars($row['scope']); ?></td>
+                                <td><?php echo htmlspecialchars($row['identifier']); ?><br><span style="color:#64748b;"><?php echo htmlspecialchars($row['ip_address'] ?: '-'); ?></span></td>
+                                <td><span class="ops-badge <?php echo (int)$row['success'] === 1 ? 'good' : 'bad'; ?>"><?php echo (int)$row['success'] === 1 ? '成功' : '失敗'; ?></span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="ops-empty">目前沒有安全嘗試紀錄。</div>
+        <?php endif; ?>
+    </section>
+
+    <section class="ops-card">
+        <h2>管理員操作審計 Log</h2>
+        <?php if (!empty($auditRows)): ?>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead><tr><th>時間</th><th>管理員</th><th>操作</th><th>目標</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($auditRows as $row): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($row['created_at']); ?></td>
+                                <td><?php echo htmlspecialchars($row['admin_username'] ?: ('#' . $row['admin_id'])); ?></td>
+                                <td><strong><?php echo htmlspecialchars($row['action']); ?></strong><br><span style="color:#64748b;"><?php echo htmlspecialchars($row['message'] ?: '-'); ?></span></td>
+                                <td><?php echo htmlspecialchars($row['target_type'] ?: '-'); ?> <?php echo $row['target_id'] !== null ? '#' . (int)$row['target_id'] : ''; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="ops-empty">目前沒有管理員操作紀錄。新的後台操作會開始寫入這裡。</div>
+        <?php endif; ?>
+    </section>
+
+    <section class="ops-card">
+        <h2>會員點數餘額快照</h2>
+        <?php if (!empty($pointRows)): ?>
+            <div class="ops-table-wrap">
+                <table class="ops-table">
+                    <thead><tr><th>會員</th><th>Email</th><th>點數</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($pointRows as $row): ?>
+                            <tr>
+                                <td>#<?php echo (int)$row['user_id']; ?> <?php echo htmlspecialchars($row['name']); ?></td>
+                                <td><?php echo htmlspecialchars($row['email']); ?></td>
+                                <td><span class="ops-badge good"><?php echo number_format((int)$row['points_balance']); ?> 點</span></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="ops-empty">目前沒有會員持有點數。</div>
+        <?php endif; ?>
+    </section>
 </div>
 
 <script>

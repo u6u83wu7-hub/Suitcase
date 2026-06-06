@@ -26,7 +26,7 @@ if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     exit();
 }
 
- $requestedAction = isset($_POST['action']) ? trim($_POST['action']) : 'unknown';
+$requestedAction = isset($_POST['action']) ? trim($_POST['action']) : 'unknown';
 // 設定針對特定 action 的 CSRF 返回頁
 $csrfReturnPage = 'backend.php?page=products';
 if ($requestedAction === 'submit_supplier_supply') {
@@ -44,6 +44,26 @@ if ($requestedAction === 'submit_supplier_supply') {
 }
 
 apRequireCsrf($csrfReturnPage);
+
+$auditTableResult = $conn->query("SHOW TABLES LIKE 'admin_audit_logs'");
+if ($auditTableResult && $auditTableResult->num_rows > 0) {
+    $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : null;
+    $targetId = null;
+    foreach (['order_id', 'product_id', 'coupon_id', 'user_id', 'category_id', 'request_id', 'supply_id', 'ticket_id'] as $targetKey) {
+        if (isset($_POST[$targetKey]) && is_scalar($_POST[$targetKey]) && (int)$_POST[$targetKey] > 0) {
+            $targetId = (int)$_POST[$targetKey];
+            break;
+        }
+    }
+    $targetType = explode('_', $requestedAction)[0] ?: 'backend';
+    $message = '後台操作已通過 CSRF 驗證並送往處理器。';
+    $auditStmt = $conn->prepare('INSERT INTO admin_audit_logs (admin_id, action, target_type, target_id, message) VALUES (?, ?, ?, ?, ?)');
+    if ($auditStmt) {
+        $auditStmt->bind_param('issis', $adminId, $requestedAction, $targetType, $targetId, $message);
+        $auditStmt->execute();
+        $auditStmt->close();
+    }
+}
 
 // 辅助函数
 function goProducts($message = '') {
