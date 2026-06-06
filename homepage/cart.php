@@ -21,7 +21,10 @@ if (!isset($_SESSION['user_id'])) {
 $userId = intval($_SESSION['user_id']);
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Cart database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線資料庫，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);

@@ -55,7 +55,10 @@ if ($id <= 0) {
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Product detail database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線資料庫，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 apRunPromotionSync($conn);
@@ -492,11 +495,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                     $targetCartItemId = intval($existsId);
                                 }
                                 if (!$ok) {
-                                    $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
+                                    error_log('Add to cart update failed: ' . $upStmt->error);
+                                    $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                                 }
                                 $upStmt->close();
                             } else {
-                                $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
+                                error_log('Add to cart update prepare failed: ' . $conn->error);
+                                $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                             }
                         }
                     } else {
@@ -508,11 +513,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 $targetCartItemId = intval($conn->insert_id);
                             }
                             if (!$ok) {
-                                $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
+                                error_log('Add to cart insert failed: ' . $insStmt->error);
+                                $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                             }
                             $insStmt->close();
                         } else {
-                            $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
+                            error_log('Add to cart insert prepare failed: ' . $conn->error);
+                            $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                         }
                     }
                     $checkStmt->close();
@@ -546,11 +553,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 $targetCartItemId = intval($existsId);
                             }
                             if (!$ok) {
-                                $cartErrorDetail = 'UPDATE cart_items 失敗：' . $upStmt->error;
+                                error_log('Add to cart update without variant failed: ' . $upStmt->error);
+                                $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                             }
                             $upStmt->close();
                         } else {
-                            $cartErrorDetail = 'UPDATE cart_items prepare 失敗：' . $conn->error;
+                            error_log('Add to cart update without variant prepare failed: ' . $conn->error);
+                            $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                         }
                     } else {
                         $insStmt = $conn->prepare('INSERT INTO cart_items (user_id, product_id, variant_id, quantity) VALUES (?, ?, NULL, ?)');
@@ -561,11 +570,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 $targetCartItemId = intval($conn->insert_id);
                             }
                             if (!$ok) {
-                                $cartErrorDetail = 'INSERT cart_items 失敗：' . $insStmt->error;
+                                error_log('Add to cart insert without variant failed: ' . $insStmt->error);
+                                $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                             }
                             $insStmt->close();
                         } else {
-                            $cartErrorDetail = 'INSERT cart_items prepare 失敗：' . $conn->error;
+                            error_log('Add to cart insert without variant prepare failed: ' . $conn->error);
+                            $cartErrorDetail = '加入購物車失敗，請稍後再試。';
                         }
                     }
                     $checkStmt->close();

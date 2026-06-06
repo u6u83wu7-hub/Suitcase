@@ -18,8 +18,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     } else {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     if ($conn->connect_error) {
-        die("資料庫連線失敗: " . $conn->connect_error);
-    }
+        error_log('Admin login database connection failed: ' . $conn->connect_error);
+        $error = "❌ 系統暫時無法連線資料庫，請稍後再試。";
+    } else {
     $conn->set_charset("utf8mb4");
     
     $username = trim($_POST['username']);
@@ -63,6 +64,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $stmt->close();
     }
     $conn->close();
+    }
     }
 }
 ?>

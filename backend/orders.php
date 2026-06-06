@@ -459,15 +459,15 @@ if ($orderResult) {
                 <?php endif; ?>
 
                 <div style="margin-top:18px; padding-top:18px; border-top:1px solid #e2e8f0;">
-                    <h3 class="om-section-title">危險區域</h3>
+                    <h3 class="om-section-title">取消與封存</h3>
                     <form action="backend_action.php" method="POST" id="deleteOrderForm" style="display:flex; gap:10px; align-items:center;">
                         <?php echo apCsrfField(); ?>
                         <input type="hidden" name="action" value="delete_order">
                         <input type="hidden" name="order_id" value="<?php echo intval($detail['order_id']); ?>">
-                        <label for="delete_older_days" style="margin:0;">此訂單已完成超過 (天)：</label>
+                        <label for="delete_older_days" style="margin:0;">取消備註保留天數：</label>
                         <input class="pm-input" type="number" id="delete_older_days" name="delete_older_days" min="0" value="0" style="max-width:80px; margin:0;">
-                        <span style="font-size:12px; color:#64748b;">（0 = 直接刪除，不檢查時間）</span>
-                        <button class="pm-btn pm-btn-danger" type="button" onclick="confirmDeleteOrder()">刪除此訂單</button>
+                        <span style="font-size:12px; color:#64748b;">訂單資料會保留，只會改為取消並回補庫存。</span>
+                        <button class="pm-btn pm-btn-danger" type="button" onclick="confirmDeleteOrder()">取消並封存訂單</button>
                     </form>
                 </div>
             <?php endif; ?>
@@ -497,8 +497,8 @@ if ($orderResult) {
     function confirmDeleteOrder() {
         const deleteOlderDays = parseInt(document.getElementById('delete_older_days').value) || 0;
         const msg = deleteOlderDays > 0
-            ? '確定要刪除這筆訂單嗎？系統會檢查該訂單是否已完成超過 ' + deleteOlderDays + ' 天。'
-            : '⚠️ 警告：確定要立即刪除這筆已完成的訂單及所有商品記錄嗎？此操作無法復原！';
+            ? '確定要取消並封存這筆訂單嗎？系統會保留訂單資料，並記錄你輸入的天數參考：' + deleteOlderDays + ' 天。'
+            : '確定要取消並封存這筆訂單嗎？系統會保留訂單資料，並在需要時回補庫存。';
 
         if (confirm(msg)) {
             document.getElementById('deleteOrderForm').submit();

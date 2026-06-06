@@ -1,6 +1,6 @@
 <?php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
 error_reporting(E_ALL);
 $pageTitle = '結帳 | All Pass';
 $activeNav = '';
@@ -9,6 +9,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 date_default_timezone_set('Asia/Taipei');
+require_once __DIR__ . '/includes/security.php';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: login.php');
@@ -18,7 +19,10 @@ if (!isset($_SESSION['user_id'])) {
 $userId = intval($_SESSION['user_id']);
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Checkout database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線資料庫，請稍後再試或聯繫客服。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 require_once __DIR__ . '/includes/storefront_helpers.php';
@@ -270,6 +274,10 @@ $formNote = $_POST['note'] ?? '';
 $formCouponId = isset($_POST['coupon_id']) ? intval($_POST['coupon_id']) : 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'place_order') {
+    if (!apValidateCsrf()) {
+        $errors[] = '表單驗證失敗，請重新操作。';
+    }
+
     if (empty($items)) {
         $errors[] = '請先選擇購物車中的商品。';
     }
@@ -653,8 +661,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             exit;
         } catch (Throwable $e) {
             $conn->rollback();
+            error_log('Checkout order creation failed for user_id ' . $userId . ': ' . $e->getMessage());
             $errors[] = '建立訂單失敗，請稍後再試。';
-            $errors[] = $e->getMessage();
         }
     }
 }
@@ -783,6 +791,7 @@ include 'header.php';
         </div>
     <?php else: ?>
         <form method="post" action="checkout.php" id="checkoutForm">
+            <?php echo apCsrfField(); ?>
             <input type="hidden" name="action" value="place_order">
 
             <?php foreach ($items as $item): ?>
