@@ -145,6 +145,7 @@ if (!empty($_GET['success'])) {
                                         <button class="pm-btn pm-btn-main pm-btn-sm js-edit-coupon" type="button" data-coupon="<?php echo htmlspecialchars(json_encode($coupon), ENT_QUOTES, 'UTF-8'); ?>">編輯</button>
                                         
                                         <form action="backend_action.php" method="POST" style="margin:0;" onsubmit="return confirm('警告：確定要永久刪除這張優惠卷嗎？');">
+                                            <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                                             <input type="hidden" name="action" value="delete_coupon">
                                             <input type="hidden" name="coupon_id" value="<?php echo intval($coupon['coupon_id']); ?>">
                                             <button class="pm-btn pm-btn-danger pm-btn-sm" type="submit">刪除</button>
@@ -178,6 +179,7 @@ if (!empty($_GET['success'])) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeCouponModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" class="modal-body" id="couponForm">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" id="couponFormAction" value="add_coupon">
             <input type="hidden" name="coupon_id" id="edit_coupon_id" value="">
             
@@ -259,6 +261,7 @@ if (!empty($_GET['success'])) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeSendCouponModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" class="modal-body">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" value="send_coupon">
 			<input type="hidden" name="coupon_id" id="send_coupon_id" value="">
 			<div class="pm-grid">

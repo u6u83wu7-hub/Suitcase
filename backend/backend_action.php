@@ -45,9 +45,67 @@ if ($requestedAction === 'submit_supplier_supply') {
 
 apRequireCsrf($csrfReturnPage);
 
+function backendCurrentAdminContext($conn) {
+    $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : 0;
+    if ($adminId <= 0) {
+        return null;
+    }
+
+    $stmt = $conn->prepare('SELECT admin_id, role_id, status FROM admin_users WHERE admin_id = ? LIMIT 1');
+    if (!$stmt) {
+        return null;
+    }
+    $stmt->bind_param('i', $adminId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$row || ($row['status'] ?? '') !== 'ACTIVE') {
+        unset($_SESSION['admin_id'], $_SESSION['admin_username'], $_SESSION['role_id']);
+        return null;
+    }
+
+    return [
+        'admin_id' => (int)$row['admin_id'],
+        'role_id' => (int)$row['role_id'],
+    ];
+}
+
+function backendActionAllowedForRole($action, $roleId) {
+    if ($roleId === 1) {
+        return true;
+    }
+
+    $roleActions = [
+        2 => ['reply_ticket_message', 'add_product_qa'],
+        3 => ['submit_supplier_supply'],
+    ];
+
+    return in_array($action, $roleActions[$roleId] ?? [], true);
+}
+
+function backendDenyAction($returnPage, $message = '權限不足，無法執行此操作。') {
+    if (!headers_sent()) {
+        header('Location: ' . $returnPage . (strpos($returnPage, '?') === false ? '?' : '&') . 'error=' . urlencode($message));
+        exit();
+    }
+
+    echo htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+    exit();
+}
+
+$currentAdminContext = backendCurrentAdminContext($conn);
+if (!$currentAdminContext) {
+    backendDenyAction('admin_login.php', '管理員帳號已停用或登入狀態失效。');
+}
+
+if (!backendActionAllowedForRole($requestedAction, $currentAdminContext['role_id'])) {
+    backendDenyAction($csrfReturnPage);
+}
+
 $auditTableResult = $conn->query("SHOW TABLES LIKE 'admin_audit_logs'");
 if ($auditTableResult && $auditTableResult->num_rows > 0) {
-    $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : null;
+    $adminId = $currentAdminContext['admin_id'];
     $targetId = null;
     foreach (['order_id', 'product_id', 'coupon_id', 'user_id', 'category_id', 'request_id', 'supply_id', 'ticket_id'] as $targetKey) {
         if (isset($_POST[$targetKey]) && is_scalar($_POST[$targetKey]) && (int)$_POST[$targetKey] > 0) {

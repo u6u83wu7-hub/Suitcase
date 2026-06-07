@@ -84,6 +84,7 @@ if ($allRes) {
             <div class="category-card" style="margin-bottom: 20px;">
                 <h2>新增分類</h2>
                 <form action="backend_action.php" method="POST">
+                    <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                     <input type="hidden" name="action" value="add_category">
                     <label style="font-size:13px; font-weight:bold; color:#475569; display:block; margin-bottom:6px;">分類名稱</label>
                     <input type="text" class="pm-input" name="name" required placeholder="例如：20吋登機箱" style="margin-bottom:12px;">
@@ -94,6 +95,7 @@ if ($allRes) {
             <div class="category-card">
                 <h2>編輯分類</h2>
                 <form action="backend_action.php" method="POST" id="editCategoryForm">
+                    <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                     <input type="hidden" name="action" value="update_category">
                     <input type="hidden" name="category_id" id="editCategoryId" value="">
                     <label style="font-size:13px; font-weight:bold; color:#475569; display:block; margin-bottom:6px;">分類名稱</label>
@@ -142,6 +144,7 @@ if ($allRes) {
                                                 編輯
                                             </button>
                                             <form action="backend_action.php" method="POST" onsubmit="return confirm('確定要刪除此分類嗎？');" style="margin:0;">
+                                                <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                                                 <input type="hidden" name="action" value="delete_category">
                                                 <input type="hidden" name="category_id" value="<?= $cat['category_id']; ?>">
                                                 <button type="submit" class="pm-btn pm-btn-danger pm-btn-sm">刪除</button>
@@ -170,6 +173,7 @@ if ($allRes) {
         </div>
         
         <form action="backend_action.php" method="POST" class="add-to-cat-box">
+            <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
             <input type="hidden" name="action" value="add_product_to_category">
             <input type="hidden" name="category_id" id="modalAddCategoryId" value="">
             <div style="flex:1;">
@@ -194,6 +198,7 @@ if ($allRes) {
 <script>
 // PHP 資料轉傳給 JS
 const categoryProducts = <?= json_encode($categoryProducts, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+const categoryCsrfToken = <?= json_encode(function_exists('apCsrfToken') ? apCsrfToken() : '', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 document.addEventListener('DOMContentLoaded', function() {
     // 編輯分類邏輯
@@ -253,6 +258,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     </div>
                     <form action="backend_action.php" method="POST" onsubmit="return confirm('確定將此商品移出分類嗎？');" style="margin:0;">
+                        <input type="hidden" name="csrf_token" value="${categoryCsrfToken.replace(/"/g, '&quot;')}">
                         <input type="hidden" name="action" value="remove_product_from_category">
                         <input type="hidden" name="category_id" value="${categoryId}">
                         <input type="hidden" name="product_id" value="${item.product_id}">

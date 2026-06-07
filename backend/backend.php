@@ -27,14 +27,24 @@ if (!in_array($page, $allowed)) {
 }
 
 // 撈取目前登入管理員的角色 ID (1 = 超級管理, 2 = 客服, 3 = 廠商)
-$admin_role_id = 2; 
+$admin_role_id = 2;
 $current_supplier_id = null;
-if (isset($_SESSION['admin_username'])) {
-    $stmt_role = $conn->prepare("SELECT role_id FROM admin_users WHERE username = ? LIMIT 1");
-    $stmt_role->bind_param("s", $_SESSION['admin_username']);
+if (isset($_SESSION['admin_id'])) {
+    $adminIdForRole = (int)$_SESSION['admin_id'];
+    $stmt_role = $conn->prepare("SELECT role_id, status FROM admin_users WHERE admin_id = ? LIMIT 1");
+    $stmt_role->bind_param("i", $adminIdForRole);
     $stmt_role->execute();
     if ($r_row = $stmt_role->get_result()->fetch_assoc()) {
+        if (($r_row['status'] ?? '') !== 'ACTIVE') {
+            unset($_SESSION['admin_id'], $_SESSION['admin_username'], $_SESSION['role_id']);
+            header('Location: admin_login.php');
+            exit();
+        }
         $admin_role_id = intval($r_row['role_id']);
+    } else {
+        unset($_SESSION['admin_id'], $_SESSION['admin_username'], $_SESSION['role_id']);
+        header('Location: admin_login.php');
+        exit();
     }
     $stmt_role->close();
 }

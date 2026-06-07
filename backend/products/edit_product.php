@@ -104,6 +104,7 @@ if (epTableExists($conn, 'inventory_adjustment_logs')) {
 
 <section class="pm-card" id="tab-edit">
     <form action="backend_action.php" method="POST" enctype="multipart/form-data">
+        <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
         <input type="hidden" name="action" value="update_product">
         <input type="hidden" name="product_id" value="<?= $product_id ?>">
 

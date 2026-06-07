@@ -43,13 +43,6 @@ if ($selectedTicketId > 0) {
     $selectedTicket = $ticketStmt->get_result()->fetch_assoc();
     $wasOpen = $selectedTicket && $selectedTicket['status'] === 'OPEN';
 
-    if ($wasOpen) {
-        $markStmt = $conn->prepare("UPDATE customer_tickets SET status = 'ANSWERED', updated_at = NOW() WHERE ticket_id = ?");
-        $markStmt->bind_param('i', $selectedTicketId);
-        $markStmt->execute();
-        $selectedTicket['status'] = 'ANSWERED';
-    }
-
     if ($selectedTicket) {
         $msgStmt = $conn->prepare("
             SELECT tm.*, pr.name AS product_name 
@@ -270,6 +263,7 @@ for ($i = 0; $i < $messageCount; $i++) {
             </div>
 
             <form class="cs-input-area" method="POST" action="backend_action.php">
+                <?php echo apCsrfField(); ?>
                 <input type="hidden" name="action" value="reply_ticket_message">
                 <input type="hidden" name="ticket_id" value="<?php echo intval($selectedTicket['ticket_id']); ?>">
                 <input type="hidden" name="return_to" value="backend.php?page=customer_service&ticket_id=<?php echo intval($selectedTicket['ticket_id']); ?>">
@@ -292,6 +286,7 @@ for ($i = 0; $i < $messageCount; $i++) {
     <div class="cs-modal">
         <h3>新增常見問題</h3>
         <form method="POST" action="backend_action.php">
+            <?php echo apCsrfField(); ?>
             <input type="hidden" name="action" value="add_product_qa">
             <input type="hidden" name="return_to" value="<?php echo h('backend.php?page=customer_service&ticket_id=' . intval($selectedTicketId)); ?>">
 

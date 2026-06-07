@@ -285,6 +285,7 @@ $pointRows = sysFetchRows($conn, "
                         </td>
                         <td>
                             <form method="POST" class="inline-form">
+                                <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                                 <input type="hidden" name="system_action" value="update_admin">
                                 <input type="hidden" name="admin_id" value="<?php echo $ad['admin_id']; ?>">
                                 
@@ -311,6 +312,7 @@ $pointRows = sysFetchRows($conn, "
     <div class="sys-card" style="background: #f8fafc;">
         <h2 class="sys-title">➕ 建立新後台帳號</h2>
         <form method="POST" style="margin:0;">
+            <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
             <input type="hidden" name="system_action" value="create_admin">
             
             <label style="font-size:13px; font-weight:700; color:#475569;">管理員登入帳號 (Username)</label>

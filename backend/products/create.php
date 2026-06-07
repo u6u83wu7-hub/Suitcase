@@ -6,6 +6,7 @@ require_once __DIR__ . '/../auth_guard.php';
 
 <section class="pm-card" id="tab-create" style="display:none;">
     <form action="backend_action.php" method="POST" enctype="multipart/form-data">
+        <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
         <input type="hidden" name="action" value="add_product">
 
         <div class="pm-section-box">

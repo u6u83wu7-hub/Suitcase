@@ -252,6 +252,7 @@ if ($activeResult) {
 										<button class="pm-btn pm-btn-edit pm-btn-sm js-upload-banner" type="button" data-id="<?php echo intval($promo['id']); ?>" data-name="<?php echo h($promo['name']); ?>">首頁跑馬燈</button>
 										
 										<form action="backend_action.php" method="POST" style="display:inline; margin:0;" onsubmit="return confirm('警告：確定要永久刪除此活動嗎？這將會同步移除綁定的商品折扣與活動圖片！');">
+											<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 											<input type="hidden" name="action" value="delete_promotion">
 											<input type="hidden" name="promotion_id" value="<?php echo intval($promo['id']); ?>">
 											<button class="pm-btn pm-btn-danger pm-btn-sm" type="submit" style="background:#b91c1c; color:#fff; border-color:#b91c1c;">刪除</button>
@@ -339,6 +340,7 @@ if ($activeResult) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closePromotionModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" value="add_promotion">
 			<div class="pm-grid">
 				<div class="pm-col-6" style="grid-column: span 6;">
@@ -410,6 +412,7 @@ if ($activeResult) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeEditPromotionModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" value="update_promotion">
 			<input type="hidden" name="promotion_id" id="edit_promotion_id" value="">
 			<div class="pm-grid">
@@ -482,6 +485,7 @@ if ($activeResult) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeBindProductsModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" class="modal-body" id="bindProductsForm">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" value="sync_promotion_products">
 			<input type="hidden" name="promotion_id" id="bindPromotionId" value="">
 			<div class="product-toolbar">
@@ -510,6 +514,7 @@ if ($activeResult) {
 			<button type="button" class="pm-btn pm-btn-sub pm-btn-sm" id="closeBannerModal">✕ 關閉</button>
 		</div>
 		<form action="backend_action.php" method="POST" enctype="multipart/form-data" class="modal-body">
+			<?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
 			<input type="hidden" name="action" value="upload_promotion_banner">
 			<input type="hidden" name="promotion_id" id="bannerPromotionId" value="">
 			<div class="pm-grid">
@@ -545,6 +550,7 @@ const promotionProducts = <?php echo json_encode($promotionProducts, JSON_UNESCA
 const allProducts = <?php echo json_encode($allProducts, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 const bannerMap = <?php echo json_encode($bannerMap, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 const productUsage = <?php echo json_encode($productUsage, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+const backendCsrfToken = <?php echo json_encode(function_exists('apCsrfToken') ? apCsrfToken() : '', JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
 
 const promotionModal = document.getElementById('promotionModal');
 const editPromotionModal = document.getElementById('editPromotionModal');
@@ -847,7 +853,8 @@ function renderBannerPreview(promotionId) {
 		form.className = 'banner-delete-form';
 		form.action = 'backend_action.php';
 		form.method = 'POST';
-		form.innerHTML = '<input type="hidden" name="action" value="delete_promotion_banner">' +
+		form.innerHTML = '<input type="hidden" name="csrf_token" value="' + backendCsrfToken.replace(/"/g, '&quot;') + '">' +
+			'<input type="hidden" name="action" value="delete_promotion_banner">' +
 			'<input type="hidden" name="promotion_id" value="' + promotionId + '">' +
 			'<input type="hidden" name="banner_image_url" value="' + url.replace(/"/g, '&quot;') + '">' +
 			'<button class="pm-btn pm-btn-sub pm-btn-sm" type="submit">刪除</button>';

@@ -96,6 +96,7 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
     </form>
 
     <form method="POST" action="backend_action.php" id="bulkForm">
+        <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
         <input type="hidden" name="action" value="bulk_update_products">
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
             <?php if (!$isVendorAccount): ?>
@@ -233,12 +234,14 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                                             <?php endif; ?>
                                             <a href="backend.php?page=products&action=edit&id=<?php echo intval($row['product_id']); ?>" class="pm-btn pm-btn-edit pm-btn-sm">編輯</a>
                                             <form method="POST" action="backend_action.php" style="display:inline;">
+                                                <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                                                 <input type="hidden" name="action" value="toggle_product_status">
                                                 <input type="hidden" name="product_id" value="<?php echo intval($row['product_id']); ?>">
                                                 <input type="hidden" name="new_status" value="<?php echo $row['status'] === 'ON SHELF' ? 'OFF SHELF' : 'ON SHELF'; ?>">
                                                 <button class="pm-btn pm-btn-sub pm-btn-sm" type="submit"><?php echo $row['status'] === 'ON SHELF' ? '設為下架' : '設為上架'; ?></button>
                                             </form>
                                             <form method="POST" action="backend_action.php" style="display:inline;" onsubmit="return confirm('確定要刪除此商品嗎？此動作無法復原。');">
+                                                <?php if (function_exists('apCsrfField')) echo apCsrfField(); ?>
                                                 <input type="hidden" name="action" value="delete_product">
                                                 <input type="hidden" name="product_id" value="<?php echo intval($row['product_id']); ?>">
                                                 <button class="pm-btn pm-btn-danger pm-btn-sm" type="submit">刪除</button>
