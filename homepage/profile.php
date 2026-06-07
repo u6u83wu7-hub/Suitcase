@@ -29,7 +29,10 @@ $orderStatusLabels = [
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Profile database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 
@@ -436,6 +439,7 @@ include 'header.php';
                                     <td style="padding:8px 6px;">
                                         <?php if ($o['status'] === 'DELIVERED'): ?>
                                             <form method="POST" action="complete_order.php" style="margin:0;">
+                                                <?php if(function_exists('apCsrfField')) echo apCsrfField(); ?>
                                                 <input type="hidden" name="order_id" value="<?php echo intval($o['order_id']); ?>">
                                                 <button type="submit" style="padding:6px 10px; border-radius:999px; background:#111; color:#fff; font-weight:700; font-size:12px; border:none; cursor:pointer;">完成訂單</button>
                                             </form>

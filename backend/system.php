@@ -21,6 +21,24 @@ if (intval($current_role) !== 1) {
 
 $msg = ''; $msg_type = 'success';
 
+function sysWriteAdminAudit($conn, $action, $targetType, $targetId, $message) {
+    $auditTableResult = $conn->query("SHOW TABLES LIKE 'admin_audit_logs'");
+    if (!$auditTableResult || $auditTableResult->num_rows <= 0) {
+        return;
+    }
+
+    $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : null;
+    $targetId = $targetId !== null ? (int)$targetId : null;
+    $stmt = $conn->prepare('INSERT INTO admin_audit_logs (admin_id, action, target_type, target_id, message) VALUES (?, ?, ?, ?, ?)');
+    if (!$stmt) {
+        return;
+    }
+
+    $stmt->bind_param('issis', $adminId, $action, $targetType, $targetId, $message);
+    $stmt->execute();
+    $stmt->close();
+}
+
 // 2. 處理後端 POST 表單提交
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_action'])) {
     if (!apValidateCsrf()) {
@@ -74,6 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_action'])) {
                     }
 
                     $conn->commit();
+                    sysWriteAdminAudit($conn, 'create_admin', 'admin_user', $adminId, '建立後台管理員帳號');
                     $msg = $new_role === 3
                         ? '成功建立廠商帳號並寫入廠商資料：' . htmlspecialchars($new_user)
                         : '成功建立全新管理員帳號：' . htmlspecialchars($new_user);
@@ -97,7 +116,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['system_action'])) {
             } else {
                 $up = $conn->prepare("UPDATE admin_users SET role_id = ?, status = ? WHERE admin_id = ?");
                 $up->bind_param("isi", $target_role, $target_status, $target_id);
-                if ($up->execute()) { $msg = '管理員權限設定更新成功！'; }
+                if ($up->execute()) {
+                    $msg = '管理員權限設定更新成功！';
+                    sysWriteAdminAudit($conn, 'update_admin', 'admin_user', $target_id, '更新後台管理員權限或狀態');
+                }
                 $up->close();
             }
         }

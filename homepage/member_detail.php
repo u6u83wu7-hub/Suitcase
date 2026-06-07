@@ -17,7 +17,10 @@ if (!isset($_SESSION['user_id'])) {
 $userId = intval($_SESSION['user_id']);
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Member detail database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 
@@ -168,6 +171,7 @@ include 'header.php';
     </div>
 
     <form method="post" style="margin-top:16px; background:#fff; border:1px solid #eee; border-radius:14px; padding:20px;">
+        <?php echo apCsrfField(); ?>
         <h2 style="font-size:20px; margin-bottom:14px;">編輯收件地址與信用卡資訊</h2>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
             <div style="grid-column:1 / -1;">

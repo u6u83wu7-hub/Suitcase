@@ -11,7 +11,10 @@ require_once __DIR__ . '/includes/price_helper.php';
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Promotion products database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 $conn->query("SET time_zone = '+08:00'");

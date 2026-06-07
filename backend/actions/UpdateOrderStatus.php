@@ -175,9 +175,13 @@ try {
                     $markInventoryStmt->bind_param("ii", $deductedFlag, $orderId);
                     $markInventoryStmt->execute();
                 }
+
+                backendRestoreOrderCouponUsage($conn, $orderId);
             }
 
             if ($currentStatus === 'CANCELLED' && $newStatus !== 'CANCELLED' && (!$hasInventoryDeductedColumn || !$inventoryDeducted)) {
+                backendDeductOrderCouponUsage($conn, $orderId);
+
                 $itemsSelect->bind_param("i", $orderId);
                 $itemsSelect->execute();
                 $itemsResult = $itemsSelect->get_result();

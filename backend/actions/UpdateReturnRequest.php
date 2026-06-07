@@ -19,57 +19,81 @@ if ($returnId <= 0 || $orderId <= 0 || !in_array($newStatus, $allowedStatuses, t
 
 $tableRes = $conn->query("SHOW TABLES LIKE 'return_requests'");
 if (!$tableRes || $tableRes->num_rows === 0) {
-    echo "<script>alert('Return request table does not exist.'); location.href='{$redirect}';</script>";
+    echo "<script>alert('退貨申請資料表不存在。'); location.href='{$redirect}';</script>";
     exit();
 }
 
-$stmt = $conn->prepare(
-    'UPDATE return_requests
-     SET status = ?, admin_note = ?, updated_at = NOW()
-     WHERE return_id = ? AND order_id = ?'
-);
+$conn->begin_transaction();
 
-if (!$stmt) {
-    echo "<script>alert('Unable to prepare return request update.'); location.href='{$redirect}';</script>";
-    exit();
-}
+try {
+    $lockStmt = $conn->prepare('SELECT status FROM return_requests WHERE return_id = ? AND order_id = ? FOR UPDATE');
+    if (!$lockStmt) {
+        throw new RuntimeException('讀取退貨申請失敗。');
+    }
+    $lockStmt->bind_param('ii', $returnId, $orderId);
+    $lockStmt->execute();
+    $currentReturn = $lockStmt->get_result()->fetch_assoc();
+    $lockStmt->close();
 
-$stmt->bind_param('ssii', $newStatus, $adminNote, $returnId, $orderId);
-if (!$stmt->execute()) {
-    echo "<script>alert('Return request update failed.'); location.href='{$redirect}';</script>";
-    exit();
-}
-$stmt->close();
+    if (!$currentReturn) {
+        throw new RuntimeException('找不到退貨申請。');
+    }
 
-if ($newStatus === 'REFUNDED') {
-    $paymentTableRes = $conn->query("SHOW TABLES LIKE 'payment_transactions'");
-    if ($paymentTableRes && $paymentTableRes->num_rows > 0) {
-        $amount = 0.0;
-        $amountStmt = $conn->prepare('SELECT total_amount FROM orders WHERE order_id = ? LIMIT 1');
-        if ($amountStmt) {
-            $amountStmt->bind_param('i', $orderId);
-            $amountStmt->execute();
-            $amountRow = $amountStmt->get_result()->fetch_assoc();
-            $amount = $amountRow ? (float)$amountRow['total_amount'] : 0.0;
-            $amountStmt->close();
-        }
+    $previousStatus = (string)$currentReturn['status'];
 
-        $transactionNo = 'REF-' . $orderId . '-' . date('YmdHis');
-        $failureReason = null;
-        $paymentMethod = 'REFUND';
-        $status = 'REFUNDED';
-        $insertStmt = $conn->prepare(
-            'INSERT INTO payment_transactions (order_id, amount, payment_method, status, transaction_no, failure_reason, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NOW())'
-        );
-        if ($insertStmt) {
-            $insertStmt->bind_param('idssss', $orderId, $amount, $paymentMethod, $status, $transactionNo, $failureReason);
-            $insertStmt->execute();
+    $stmt = $conn->prepare(
+        'UPDATE return_requests
+         SET status = ?, admin_note = ?, updated_at = NOW()
+         WHERE return_id = ? AND order_id = ?'
+    );
+    if (!$stmt) {
+        throw new RuntimeException('準備更新退貨申請失敗。');
+    }
+    $stmt->bind_param('ssii', $newStatus, $adminNote, $returnId, $orderId);
+    if (!$stmt->execute()) {
+        throw new RuntimeException('退貨申請更新失敗。');
+    }
+    $stmt->close();
+
+    if ($newStatus === 'REFUNDED' && $previousStatus !== 'REFUNDED') {
+        $paymentTableRes = $conn->query("SHOW TABLES LIKE 'payment_transactions'");
+        if ($paymentTableRes && $paymentTableRes->num_rows > 0) {
+            $amount = 0.0;
+            $amountStmt = $conn->prepare('SELECT total_amount FROM orders WHERE order_id = ? LIMIT 1');
+            if ($amountStmt) {
+                $amountStmt->bind_param('i', $orderId);
+                $amountStmt->execute();
+                $amountRow = $amountStmt->get_result()->fetch_assoc();
+                $amount = $amountRow ? (float)$amountRow['total_amount'] : 0.0;
+                $amountStmt->close();
+            }
+
+            $transactionNo = 'REF-' . $orderId . '-' . date('YmdHis');
+            $failureReason = null;
+            $paymentMethod = 'REFUND';
+            $paymentStatus = 'REFUNDED';
+            $insertStmt = $conn->prepare(
+                'INSERT INTO payment_transactions (order_id, amount, payment_method, status, transaction_no, failure_reason, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, NOW())'
+            );
+            if (!$insertStmt) {
+                throw new RuntimeException('準備退款紀錄失敗。');
+            }
+            $insertStmt->bind_param('idssss', $orderId, $amount, $paymentMethod, $paymentStatus, $transactionNo, $failureReason);
+            if (!$insertStmt->execute()) {
+                throw new RuntimeException('建立退款紀錄失敗。');
+            }
             $insertStmt->close();
         }
     }
-}
 
-echo "<script>alert('Return request updated.'); location.href='{$redirect}';</script>";
-exit();
+    $conn->commit();
+    echo "<script>alert('退貨申請已更新。'); location.href='{$redirect}';</script>";
+    exit();
+} catch (Throwable $e) {
+    $conn->rollback();
+    $message = addslashes($e->getMessage());
+    echo "<script>alert('{$message}'); location.href='{$redirect}';</script>";
+    exit();
+}
 ?>

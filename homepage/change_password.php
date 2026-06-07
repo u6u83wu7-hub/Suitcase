@@ -1,5 +1,8 @@
 <?php
 session_start();
+require_once __DIR__ . '/includes/security.php';
+
+apConfigureErrorHandling();
 
 if (!isset($_SESSION['user_id'])) {
     header("Location: login.php");
@@ -17,6 +20,9 @@ function isValidPassword($password) {
 }
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    if (!apValidateCsrf()) {
+        $error_message = '表單驗證失敗，請重新操作。';
+    } else {
     $currentPassword = $_POST['current_password'] ?? '';
     $newPassword = $_POST['new_password'] ?? '';
     $confirmPassword = $_POST['confirm_password'] ?? '';
@@ -28,8 +34,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     } else {
         $conn = new mysqli("localhost", "root", "", "all_pass_db");
         if ($conn->connect_error) {
-            die("資料庫連線失敗: " . $conn->connect_error);
-        }
+            error_log('Member change password database connection failed: ' . $conn->connect_error);
+            $error_message = '系統暫時無法連線，請稍後再試。';
+        } else {
         $conn->set_charset("utf8mb4");
 
         $stmt = $conn->prepare("SELECT password_hash FROM users WHERE user_id = ?");
@@ -58,6 +65,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
 
         $conn->close();
+        }
+    }
     }
 }
 ?>
@@ -84,6 +93,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         <?php endif; ?>
 
         <form action="change_password.php" method="POST">
+            <?php echo apCsrfField(); ?>
             <div style="margin-bottom:18px;">
                 <label style="display:block; margin-bottom:8px; font-weight:600; color:#333;">目前密碼</label>
                 <input type="password" name="current_password" required style="width:100%; padding:12px; border:1px solid #ddd; border-radius:6px;">

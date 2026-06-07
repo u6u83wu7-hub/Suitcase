@@ -57,6 +57,10 @@ try {
         $restockStmt->close();
     }
 
+    if ($order['status'] !== 'CANCELLED') {
+        backendRestoreOrderCouponUsage($conn, $orderId);
+    }
+
     $note = '後台於 ' . date('Y-m-d H:i:s') . ' 將此訂單封存為取消。';
     if ($hasAdminNotes && $hasInventoryDeducted) {
         $deducted = 0;

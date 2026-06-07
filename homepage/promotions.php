@@ -9,7 +9,10 @@ require_once __DIR__ . '/includes/storefront_helpers.php';
 
 $conn = new mysqli('localhost', 'root', '', 'all_pass_db');
 if ($conn->connect_error) {
-    die('資料庫連線失敗: ' . $conn->connect_error);
+    error_log('Promotions database connection failed: ' . $conn->connect_error);
+    http_response_code(500);
+    echo '系統暫時無法連線，請稍後再試。';
+    exit;
 }
 $conn->set_charset('utf8mb4');
 
@@ -105,7 +108,14 @@ include 'header.php';
         <div class="promo-list">
             <?php foreach ($promotions as $promo): ?>
                 <?php [$statusText, $statusClass] = promoStatusLabel($promo['start_at'], $promo['end_at']); ?>
-                <?php $promoImage = $promo['promotion_image_url'] ?: ($promo['banner_image_url'] ?? ''); ?>
+                <?php
+                $promoImage = '';
+                if (!empty($promo['promotion_image_url']) && sfPublicFileExists($promo['promotion_image_url'])) {
+                    $promoImage = $promo['promotion_image_url'];
+                } elseif (!empty($promo['banner_image_url']) && sfPublicFileExists($promo['banner_image_url'])) {
+                    $promoImage = $promo['banner_image_url'];
+                }
+                ?>
                 <article class="promo-card">
                     <div class="promo-image">
                         <?php if (!empty($promoImage)): ?>

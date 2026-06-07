@@ -16,8 +16,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $conn = new mysqli("localhost", "root", "", "all_pass_db");
     
     if ($conn->connect_error) {
-        die("資料庫連線失敗: " . $conn->connect_error);
-    }
+        error_log('Register database connection failed: ' . $conn->connect_error);
+        $error_message = "系統暫時無法連線，請稍後再試。";
+    } else {
     $conn->set_charset("utf8mb4");
 
     // 取得使用者填寫的資料
@@ -63,6 +64,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     }
     $conn->close();
+    }
     }
 }
 ?>

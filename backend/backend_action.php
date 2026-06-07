@@ -134,6 +134,114 @@ function tableColumns($conn, $tableName) {
     return $columns;
 }
 
+function backendTableExists($conn, $tableName) {
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function backendFetchOrderCoupon($conn, $orderId) {
+    if (!backendTableExists($conn, 'coupon_distributions')) {
+        return null;
+    }
+
+    $stmt = $conn->prepare('SELECT user_id, coupon_id FROM orders WHERE order_id = ? AND coupon_id IS NOT NULL AND coupon_id > 0 LIMIT 1');
+    if (!$stmt) {
+        throw new RuntimeException('讀取訂單優惠券資料失敗。');
+    }
+    $stmt->bind_param('i', $orderId);
+    $stmt->execute();
+    $order = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$order) {
+        return null;
+    }
+
+    return [
+        'user_id' => (int)$order['user_id'],
+        'coupon_id' => (int)$order['coupon_id'],
+    ];
+}
+
+function backendRestoreOrderCouponUsage($conn, $orderId) {
+    $coupon = backendFetchOrderCoupon($conn, $orderId);
+    if (!$coupon) {
+        return;
+    }
+
+    $select = $conn->prepare('SELECT distribution_id FROM coupon_distributions WHERE coupon_id = ? AND user_id = ? LIMIT 1 FOR UPDATE');
+    if (!$select) {
+        throw new RuntimeException('鎖定會員優惠券資料失敗。');
+    }
+    $select->bind_param('ii', $coupon['coupon_id'], $coupon['user_id']);
+    $select->execute();
+    $distribution = $select->get_result()->fetch_assoc();
+    $select->close();
+
+    if ($distribution) {
+        $distributionId = (int)$distribution['distribution_id'];
+        $update = $conn->prepare('UPDATE coupon_distributions SET quantity = quantity + 1 WHERE distribution_id = ?');
+        if (!$update) {
+            throw new RuntimeException('回補會員優惠券失敗。');
+        }
+        $update->bind_param('i', $distributionId);
+        $update->execute();
+        $update->close();
+        return;
+    }
+
+    $targetType = 'SINGLE';
+    $quantity = 1;
+    $insert = $conn->prepare('INSERT INTO coupon_distributions (coupon_id, user_id, quantity, target_type) VALUES (?, ?, ?, ?)');
+    if (!$insert) {
+        throw new RuntimeException('重建會員優惠券資料失敗。');
+    }
+    $insert->bind_param('iiis', $coupon['coupon_id'], $coupon['user_id'], $quantity, $targetType);
+    $insert->execute();
+    $insert->close();
+}
+
+function backendDeductOrderCouponUsage($conn, $orderId) {
+    $coupon = backendFetchOrderCoupon($conn, $orderId);
+    if (!$coupon) {
+        return;
+    }
+
+    $select = $conn->prepare('SELECT distribution_id, quantity FROM coupon_distributions WHERE coupon_id = ? AND user_id = ? AND quantity > 0 ORDER BY distribution_id ASC LIMIT 1 FOR UPDATE');
+    if (!$select) {
+        throw new RuntimeException('鎖定會員優惠券資料失敗。');
+    }
+    $select->bind_param('ii', $coupon['coupon_id'], $coupon['user_id']);
+    $select->execute();
+    $distribution = $select->get_result()->fetch_assoc();
+    $select->close();
+
+    if (!$distribution) {
+        throw new RuntimeException('會員優惠券數量不足，無法恢復此訂單。');
+    }
+
+    $distributionId = (int)$distribution['distribution_id'];
+    $quantity = (int)$distribution['quantity'];
+    if ($quantity > 1) {
+        $update = $conn->prepare('UPDATE coupon_distributions SET quantity = quantity - 1 WHERE distribution_id = ?');
+        if (!$update) {
+            throw new RuntimeException('扣回會員優惠券失敗。');
+        }
+        $update->bind_param('i', $distributionId);
+        $update->execute();
+        $update->close();
+    } else {
+        $delete = $conn->prepare('DELETE FROM coupon_distributions WHERE distribution_id = ?');
+        if (!$delete) {
+            throw new RuntimeException('使用會員優惠券失敗。');
+        }
+        $delete->bind_param('i', $distributionId);
+        $delete->execute();
+        $delete->close();
+    }
+}
+
 function boolPost($key) {
     return isset($_POST[$key]) && (string)$_POST[$key] === '1';
 }

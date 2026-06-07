@@ -214,6 +214,7 @@ include 'header.php';
         </div>
     <?php else: ?>
         <form method="post" action="cart.php" id="cartForm">
+            <?php echo apCsrfField(); ?>
             <div style="overflow:auto; background:#fff; border:1px solid #eee; border-radius:14px;">
                 <table style="width:100%; border-collapse:collapse; min-width:920px;">
                     <thead>
