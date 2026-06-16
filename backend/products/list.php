@@ -117,7 +117,7 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
         </div>
 
         <div class="pm-table-wrap">
-            <table class="pm-table">
+            <table class="pm-table pm-product-table <?php echo $isVendorAccount ? 'pm-product-table-vendor' : ''; ?>">
                 <thead>
                     <tr>
                         <?php if (!$isVendorAccount): ?>
@@ -127,7 +127,7 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                         <th>商品名稱</th>
                         <th>分類</th>
                         <th>廠商</th>
-                        <th>SKU</th>
+                        <th title="每一組尺寸 / 顏色 / 價格 / 庫存組合是一個 SKU。">規格數</th>
                         <th>價格區間</th>
                         <th>總庫存</th>
                         <th>狀態</th>
@@ -152,14 +152,14 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                                 <?php if (!$isVendorAccount): ?>
                                     <td><input type="checkbox" name="product_ids[]" value="<?php echo intval($row['product_id']); ?>" class="rowCheck"></td>
                                 <?php endif; ?>
-                                <td>
+                                <td class="pm-text-wrap">
                                     <?php if (!empty($row['main_image'])): ?>
                                         <img class="pm-thumb" src="../<?php echo htmlspecialchars($row['main_image']); ?>" alt="thumb">
                                     <?php else: ?>
                                         <span class="pm-thumb"></span>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="pm-text-wrap">
                                     <?php if ($isVendorAccount): ?>
                                         <span class="pm-link" style="cursor:default; text-decoration:none; color:inherit;">
                                             <?php echo htmlspecialchars($row['name']); ?>
@@ -170,22 +170,25 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                                         </a>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="pm-text-wrap">
                                     <?php if (empty($row['category_names'])): ?>
                                         <span style="color:#94a3b8;">不分類</span>
                                     <?php else: ?>
                                         <?php echo htmlspecialchars($row['category_names']); ?>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="pm-text-wrap">
                                     <?php if (!empty($row['supplier_name'])): ?>
                                         <?php echo htmlspecialchars($row['supplier_name']); ?>
                                     <?php else: ?>
                                         <span style="color:#94a3b8;">未指定廠商</span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?php echo $skuCount; ?></td>
-                                <td>
+                                <td class="pm-nowrap">
+                                    <strong><?php echo $skuCount; ?></strong>
+                                    <div style="margin-top:4px; color:#94a3b8; font-size:12px;">SKU</div>
+                                </td>
+                                <td class="pm-nowrap">
                                     <?php if ($row['min_price'] === null): ?>
                                         -
                                     <?php elseif ((float)$row['min_price'] === (float)$row['max_price']): ?>
@@ -194,7 +197,7 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                                         $<?php echo number_format((float)$row['min_price']); ?> ~ <?php echo number_format((float)$row['max_price']); ?>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="pm-nowrap">
                                     <span style="<?php echo $totalStock === 0 ? 'color:#ef4444; font-weight:bold;' : ''; ?>">
                                         <?php echo number_format($totalStock); ?>
                                     </span>
@@ -212,19 +215,19 @@ if ($isVendorAccount && $vendorSupplierId > 0) {
                                         <?php endif; ?>
                                     </div>
                                 </td>
-                                <td>
+                                <td class="pm-nowrap">
                                     <span class="pm-badge <?php echo $row['status'] === 'ON SHELF' ? 'pm-on' : 'pm-off'; ?>">
                                         <?php echo $row['status'] === 'ON SHELF' ? '上架中' : '已下架'; ?>
                                     </span>
                                 </td>
-                                <td>
+                                <td class="pm-nowrap">
                                     <?php if ((int)$row['is_featured'] === 1): ?>
                                         <span class="pm-badge pm-featured">精選</span>
                                     <?php else: ?>
                                         <span style="color:#cbd5e1;">-</span>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="pm-nowrap">
                                     <?php if ($isVendorAccount): ?>
                                         <span style="color:#94a3b8; font-size:13px;">僅供瀏覽</span>
                                     <?php else: ?>

@@ -78,6 +78,10 @@ require_once __DIR__ . '/../auth_guard.php';
                         <div class="pm-col-3">
                             <label>顏色</label>
                             <input class="pm-input sku-color-input" type="text" name="color[]" placeholder="例如：消光黑">
+                            <div class="sku-color-tools">
+                                <input class="sku-color-picker" type="color" value="#111827" aria-label="選擇色票">
+                                <input class="pm-input sku-color-hex-input" type="text" name="color_hex[]" placeholder="#111827" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$">
+                            </div>
                         </div>
                         <div class="pm-col-3">
                             <label>原價 (NT$) <span style="color:#ef4444;">*</span></label>
@@ -85,11 +89,13 @@ require_once __DIR__ . '/../auth_guard.php';
                         </div>
                         <div class="pm-col-3">
                             <label>特價 (NT$)</label>
-                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" placeholder="可留空">
+                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" placeholder="留空代表無特價">
+                            <div class="sku-field-help">留空代表無特價；特價需大於 0 且低於原價。</div>
                         </div>
                         <div class="pm-col-3">
-                            <label>會員價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <label>VIP 價 (NT$) <span style="color:#ef4444;">*</span></label>
                             <input class="pm-input" type="number" name="member_price[]" min="0" step="1" required placeholder="0">
+                            <div class="sku-field-help">只有 VIP / VVIP 會員會套用此價格。</div>
                         </div>
                         <div class="pm-col-3">
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>

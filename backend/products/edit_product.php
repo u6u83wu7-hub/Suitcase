@@ -15,6 +15,34 @@ function epTableExists($conn, $tableName) {
     return $res && $res->num_rows > 0;
 }
 
+function epSizeSortValue($size) {
+    $size = trim((string)$size);
+    if ($size === '') {
+        return 999999;
+    }
+    if (preg_match('/\d+/', $size, $match)) {
+        return (int)$match[0];
+    }
+    return 999999;
+}
+
+function epCompareVariantsBySize($a, $b) {
+    $sizeA = epSizeSortValue($a['size_inches'] ?? '');
+    $sizeB = epSizeSortValue($b['size_inches'] ?? '');
+    if ($sizeA !== $sizeB) {
+        return $sizeA <=> $sizeB;
+    }
+    $rawSizeCompare = strcmp((string)($a['size_inches'] ?? ''), (string)($b['size_inches'] ?? ''));
+    if ($rawSizeCompare !== 0) {
+        return $rawSizeCompare;
+    }
+    $colorCompare = strcmp((string)($a['color'] ?? ''), (string)($b['color'] ?? ''));
+    if ($colorCompare !== 0) {
+        return $colorCompare;
+    }
+    return (int)($a['variant_id'] ?? 0) <=> (int)($b['variant_id'] ?? 0);
+}
+
 // 1. 取得基本資料
 $stmt = $conn->prepare("SELECT * FROM products WHERE product_id = ?");
 $stmt->bind_param("i", $product_id);
@@ -47,6 +75,7 @@ $vStmt->bind_param("i", $product_id);
 $vStmt->execute();
 $vRes = $vStmt->get_result();
 while ($v = $vRes->fetch_assoc()) $variants[] = $v;
+usort($variants, 'epCompareVariantsBySize');
 if (empty($variants)) { 
     $variants[] = [
         'variant_id' => '',
@@ -168,7 +197,7 @@ if (epTableExists($conn, 'inventory_adjustment_logs')) {
             </div>
             <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding:12px 14px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; margin-bottom:14px;">
                 <span style="font-weight:700; color:#0f172a;">庫存摘要</span>
-                <span class="pm-badge" style="background:#e2e8f0; color:#334155;">SKU <?php echo $skuCount; ?></span>
+                <span class="pm-badge" style="background:#e2e8f0; color:#334155;" title="每一組尺寸 / 顏色 / 價格 / 庫存組合是一個 SKU。">規格 <?php echo $skuCount; ?></span>
                 <span class="pm-badge" style="background:#dcfce7; color:#166534;">總庫存 <?php echo number_format($totalStock); ?></span>
                 <?php if ($lowSkuCount > 0): ?>
                     <span class="pm-badge" style="background:#fef3c7; color:#92400e;">低庫存 <?php echo $lowSkuCount; ?></span>
@@ -202,6 +231,10 @@ if (epTableExists($conn, 'inventory_adjustment_logs')) {
                         <div class="pm-col-3">
                             <label>顏色</label>
                             <input class="pm-input sku-color-input" type="text" name="color[]" value="<?= htmlspecialchars($v['color'] ?? '') ?>">
+                            <div class="sku-color-tools">
+                                <input class="sku-color-picker" type="color" value="<?= preg_match('/^#[0-9A-F]{6}$/', isset($v['color_hex']) ? strtoupper(trim((string)$v['color_hex'])) : '') ? htmlspecialchars(strtoupper(trim((string)$v['color_hex']))) : '#111827' ?>" aria-label="選擇色票">
+                                <input class="pm-input sku-color-hex-input" type="text" name="color_hex[]" value="<?= htmlspecialchars(isset($v['color_hex']) ? strtoupper(trim((string)$v['color_hex'])) : '') ?>" placeholder="#111827" maxlength="7" pattern="^#[0-9A-Fa-f]{6}$">
+                            </div>
                         </div>
                         <div class="pm-col-3">
                             <label>原價 (NT$) <span style="color:#ef4444;">*</span></label>
@@ -209,11 +242,13 @@ if (epTableExists($conn, 'inventory_adjustment_logs')) {
                         </div>
                         <div class="pm-col-3">
                             <label>特價 (NT$)</label>
-                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" value="<?= $v['special_price'] === null ? '' : floatval($v['special_price']) ?>">
+                            <input class="pm-input" type="number" name="special_price[]" min="0" step="1" value="<?= $v['special_price'] === null ? '' : floatval($v['special_price']) ?>" placeholder="留空代表無特價">
+                            <div class="sku-field-help">留空代表無特價；特價需大於 0 且低於原價。</div>
                         </div>
                         <div class="pm-col-3">
-                            <label>會員價 (NT$) <span style="color:#ef4444;">*</span></label>
+                            <label>VIP 價 (NT$) <span style="color:#ef4444;">*</span></label>
                             <input class="pm-input" type="number" name="member_price[]" min="0" step="1" required value="<?= floatval($v['member_price'] ?? 0) ?>">
+                            <div class="sku-field-help">只有 VIP / VVIP 會員會套用此價格。</div>
                         </div>
                         <div class="pm-col-3">
                             <label>庫存數量 <span style="color:#ef4444;">*</span></label>
