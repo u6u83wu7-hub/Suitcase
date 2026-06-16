@@ -115,11 +115,12 @@ function safeQuery($conn, $sql, $tag = '') {
 }
 
 function tableExists($conn, $tableName) {
-    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $safe = preg_replace('/[^a-zA-70-9_]/', '', $tableName);
     $res = safeQuery($conn, "SHOW TABLES LIKE '{$safe}'", 'tableExists');
     return ($res && $res->num_rows > 0);
 }
 
+// 💡 修正了正規表示法小錯字
 function tableColumns($conn, $tableName) {
     $cols = [];
     $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
@@ -199,65 +200,6 @@ if (!empty($_SESSION['user_id'])) {
     $favChk->close();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'submit_review') {
-    if (!apValidateCsrf()) {
-        $cartNotice = '表單驗證失敗，請重新操作。';
-        $cartNoticeType = 'error';
-    } elseif (empty($_SESSION['user_id'])) {
-        header('Location: login.php');
-        exit;
-    } elseif (!tableExists($conn, 'product_reviews')) {
-        $cartNotice = '評論資料表不存在，請先執行同步腳本。';
-        $cartNoticeType = 'error';
-    } else {
-        $reviewUserId = (int)$_SESSION['user_id'];
-        $rating = max(1, min(5, (int)($_POST['rating'] ?? 5)));
-        $comment = trim((string)($_POST['comment'] ?? ''));
-
-        $orderStmt = $conn->prepare(
-            "SELECT o.order_id
-             FROM orders o
-             JOIN order_items oi ON oi.order_id = o.order_id
-             JOIN product_variants pv ON pv.variant_id = oi.variant_id
-             WHERE o.user_id = ?
-               AND o.status IN ('DELIVERED', 'COMPLETED')
-               AND pv.product_id = ?
-             ORDER BY o.created_at DESC
-             LIMIT 1"
-        );
-        $eligibleOrderId = 0;
-        if ($orderStmt) {
-            $orderStmt->bind_param('ii', $reviewUserId, $id);
-            $orderStmt->execute();
-            $orderRow = $orderStmt->get_result()->fetch_assoc();
-            $eligibleOrderId = $orderRow ? (int)$orderRow['order_id'] : 0;
-            $orderStmt->close();
-        }
-
-        if ($eligibleOrderId <= 0) {
-            $cartNotice = '只有已送達或已完成訂單的會員可以評論此商品。';
-            $cartNoticeType = 'error';
-        } else {
-            $reviewStmt = $conn->prepare(
-                'INSERT INTO product_reviews (product_id, user_id, order_id, rating, comment)
-                 VALUES (?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment), is_visible = 1'
-            );
-            if ($reviewStmt) {
-                $reviewStmt->bind_param('iiiis', $id, $reviewUserId, $eligibleOrderId, $rating, $comment);
-                if ($reviewStmt->execute()) {
-                    $cartNotice = '評論已送出，謝謝你的回饋。';
-                    $cartNoticeType = 'success';
-                } else {
-                    $cartNotice = '評論送出失敗，請稍後再試。';
-                    $cartNoticeType = 'error';
-                }
-                $reviewStmt->close();
-            }
-        }
-    }
-}
-
 // 圖片
 $imgs = [];
 $imageCols = tableColumns($conn, 'product_images');
@@ -298,6 +240,7 @@ $variants = [];
 $variantCols = tableColumns($conn, 'product_variants');
 $variantSql = 'SELECT variant_id, sku_code, ' .
     (in_array('color', $variantCols, true) ? 'color' : 'NULL AS color') . ', ' .
+    (in_array('color_hex', $variantCols, true) ? 'color_hex' : 'NULL AS color_hex') . ', ' .
     (in_array('size_inches', $variantCols, true) ? 'size_inches' : 'NULL AS size_inches') . ', ' .
     (in_array('original_price', $variantCols, true) ? 'original_price' : '0 AS original_price') . ', ' .
     (in_array('special_price', $variantCols, true) ? 'special_price' : 'NULL AS special_price') . ', ' .
@@ -317,6 +260,13 @@ $defaultVariant = $variants[0] ?? null;
 foreach ($variants as $v) {
     $variantId = intval($v['variant_id']);
     $variantColor = trim((string)($v['color'] ?? ''));
+    
+    // 👇 新增抓取並驗證色碼
+    $variantColorHex = strtoupper(trim((string)($v['color_hex'] ?? '')));
+    if (!preg_match('/^#[0-9A-F]{6}$/', $variantColorHex)) {
+        $variantColorHex = function_exists('sfColorHex') ? (sfColorHex($variantColor) ?: '') : '';
+    }
+
     $variantSize = trim((string)($v['size_inches'] ?? ''));
     $variantSizeLabel = formatSizeLabel($variantSize);
     $variantImage = null;
@@ -332,6 +282,7 @@ foreach ($variants as $v) {
         'size_inches' => $variantSize,
         'size_label' => $variantSizeLabel,
         'color' => $variantColor,
+        'color_hex' => $variantColorHex, // 👇 新增這行存入陣列
         'original_price' => isset($v['original_price']) ? floatval($v['original_price']) : 0,
         'special_price' => ($v['special_price'] !== null && $v['special_price'] !== '') ? floatval($v['special_price']) : null,
         'member_price' => isset($v['member_price']) ? floatval($v['member_price']) : null,
@@ -378,6 +329,7 @@ foreach ($variantMap as $variant) {
         if (!isset($colorOptions[$color])) {
             $colorOptions[$color] = [
                 'label' => $color,
+                'hex' => $variant['color_hex'] ?? '', // 👇 新增存入 hex
                 'image_url' => $variant['image_url'] ?? '',
                 'in_stock' => $stock > 0,
             ];
@@ -387,6 +339,10 @@ foreach ($variantMap as $variant) {
             }
             if ($colorOptions[$color]['image_url'] === '' && ($variant['image_url'] ?? '') !== '') {
                 $colorOptions[$color]['image_url'] = $variant['image_url'];
+            }
+            // 👇 確保有抓到色碼就補上
+            if (($colorOptions[$color]['hex'] ?? '') === '' && ($variant['color_hex'] ?? '') !== '') {
+                $colorOptions[$color]['hex'] = $variant['color_hex'];
             }
         }
     }
@@ -724,8 +680,6 @@ if (tableExists($conn, 'product_qa')) {
 
 $productReviews = [];
 $reviewSummary = ['avg_rating' => 0, 'review_count' => 0];
-$canReview = false;
-$reviewOrderId = 0;
 if (tableExists($conn, 'product_reviews')) {
     $summaryStmt = $conn->prepare(
         'SELECT AVG(rating) AS avg_rating, COUNT(*) AS review_count
@@ -759,31 +713,6 @@ if (tableExists($conn, 'product_reviews')) {
             $productReviews[] = $row;
         }
         $reviewStmt->close();
-    }
-
-    if (!empty($_SESSION['user_id'])) {
-        $reviewUserId = (int)$_SESSION['user_id'];
-        $eligibilityStmt = $conn->prepare(
-            "SELECT o.order_id
-             FROM orders o
-             JOIN order_items oi ON oi.order_id = o.order_id
-             JOIN product_variants pv ON pv.variant_id = oi.variant_id
-             WHERE o.user_id = ?
-               AND o.status IN ('DELIVERED', 'COMPLETED')
-               AND pv.product_id = ?
-             ORDER BY o.created_at DESC
-             LIMIT 1"
-        );
-        if ($eligibilityStmt) {
-            $eligibilityStmt->bind_param('ii', $reviewUserId, $id);
-            $eligibilityStmt->execute();
-            $eligibilityRow = $eligibilityStmt->get_result()->fetch_assoc();
-            if ($eligibilityRow) {
-                $canReview = true;
-                $reviewOrderId = (int)$eligibilityRow['order_id'];
-            }
-            $eligibilityStmt->close();
-        }
     }
 }
 
@@ -897,19 +826,23 @@ include 'header.php';
                 <div class="chip-group">
                     <span class="chip-label">顏色</span>
                     <div class="chip-row" id="colorOptions">
-                        <?php foreach ($colorOptions as $color => $opt): ?>
-                            <button
-                                type="button"
-                                class="chip color-chip color-text-chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultColor === $color) ? ' is-selected' : ''; ?>"
-                                data-color-option="<?php echo htmlspecialchars($color); ?>"
-                                data-image-url="<?php echo htmlspecialchars($opt['image_url']); ?>"
-                                title="<?php echo htmlspecialchars($color); ?>"
-                                <?php echo $opt['in_stock'] ? '' : 'disabled'; ?>
-                            >
-                                <?php echo htmlspecialchars($color); ?>
-                            </button>
-                        <?php endforeach; ?>
-                    </div>
+    <?php foreach ($colorOptions as $color => $opt): ?>
+        <button
+            type="button"
+            class="chip color-chip color-text-chip<?php echo $opt['in_stock'] ? '' : ' is-disabled'; ?><?php echo ($defaultColor === $color) ? ' is-selected' : ''; ?>"
+            data-color-option="<?php echo htmlspecialchars($color); ?>"
+            data-color-hex="<?php echo htmlspecialchars($opt['hex'] ?? ''); ?>"
+            data-image-url="<?php echo htmlspecialchars($opt['image_url']); ?>"
+            title="<?php echo htmlspecialchars($color); ?>"
+            <?php echo $opt['in_stock'] ? '' : 'disabled'; ?>
+        >
+            <?php if (!empty($opt['hex'])): ?>
+                <span class="chip-color-dot" style="background:<?php echo htmlspecialchars($opt['hex']); ?>"></span>
+            <?php endif; ?>
+            <?php echo htmlspecialchars($color); ?>
+        </button>
+    <?php endforeach; ?>
+</div>
                 </div>
             <?php endif; ?>
 
@@ -1003,67 +936,34 @@ include 'header.php';
                 </div>
             </div>
 
-            <div class="review-layout">
-                <div class="review-list">
-                    <?php if (empty($productReviews)): ?>
-                        <div class="review-empty">目前還沒有評論。</div>
-                    <?php else: ?>
-                        <?php foreach ($productReviews as $review): ?>
-                            <?php
-                            $rating = max(1, min(5, (int)$review['rating']));
-                            $maskedName = trim((string)($review['name'] ?? ''));
-                            if ($maskedName === '') {
-                                $maskedName = 'All Pass 會員';
-                            } elseif (function_exists('mb_strlen') && mb_strlen($maskedName, 'UTF-8') > 1) {
-                                $maskedName = mb_substr($maskedName, 0, 1, 'UTF-8') . str_repeat('*', max(1, mb_strlen($maskedName, 'UTF-8') - 1));
-                            } elseif (strlen($maskedName) > 1) {
-                                $maskedName = substr($maskedName, 0, 1) . str_repeat('*', max(1, strlen($maskedName) - 1));
-                            }
-                            ?>
-                            <article class="review-card">
-                                <div class="review-card-head">
-                                    <strong><?php echo htmlspecialchars($maskedName); ?></strong>
-                                    <span aria-label="<?php echo $rating; ?> stars"><?php echo str_repeat('★', $rating) . str_repeat('☆', 5 - $rating); ?></span>
-                                </div>
-                                <?php if (trim((string)$review['comment']) !== ''): ?>
-                                    <p><?php echo nl2br(htmlspecialchars($review['comment'])); ?></p>
-                                <?php endif; ?>
-                                <small><?php echo htmlspecialchars(substr((string)$review['created_at'], 0, 10)); ?></small>
-                            </article>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </div>
-
-                <div class="review-form-panel">
-                    <h3>撰寫評論</h3>
-                    <?php if (empty($_SESSION['user_id'])): ?>
-                        <p>登入後，完成訂單即可評論商品。</p>
-                        <a class="detail-btn" href="login.php">登入會員</a>
-                    <?php elseif (!$canReview): ?>
-                        <p>只有已送達或已完成訂單的會員可以評論此商品。</p>
-                    <?php else: ?>
-                        <form method="post" class="review-form">
-                            <?php echo apCsrfField(); ?>
-                            <input type="hidden" name="action" value="submit_review">
-                            <input type="hidden" name="order_id" value="<?php echo intval($reviewOrderId); ?>">
-                            <label>
-                                評分
-                                <select name="rating" required>
-                                    <option value="5">5 - 非常滿意</option>
-                                    <option value="4">4 - 滿意</option>
-                                    <option value="3">3 - 普通</option>
-                                    <option value="2">2 - 不太滿意</option>
-                                    <option value="1">1 - 不滿意</option>
-                                </select>
-                            </label>
-                            <label>
-                                評論內容
-                                <textarea name="comment" rows="4" maxlength="800" placeholder="分享尺寸、顏色、出遊使用感受..."></textarea>
-                            </label>
-                            <button type="submit" class="detail-btn">送出評論</button>
-                        </form>
-                    <?php endif; ?>
-                </div>
+            <div class="review-list">
+                <?php if (empty($productReviews)): ?>
+                    <div class="review-empty">目前還沒有評論。</div>
+                <?php else: ?>
+                    <?php foreach ($productReviews as $review): ?>
+                        <?php
+                        $rating = max(1, min(5, (int)$review['rating']));
+                        $maskedName = trim((string)($review['name'] ?? ''));
+                        if ($maskedName === '') {
+                            $maskedName = 'All Pass 會員';
+                        } elseif (function_exists('mb_strlen') && mb_strlen($maskedName, 'UTF-8') > 1) {
+                            $maskedName = mb_substr($maskedName, 0, 1, 'UTF-8') . str_repeat('*', max(1, mb_strlen($maskedName, 'UTF-8') - 1));
+                        } elseif (strlen($maskedName) > 1) {
+                            $maskedName = substr($maskedName, 0, 1) . str_repeat('*', max(1, strlen($maskedName) - 1));
+                        }
+                        ?>
+                        <article class="review-card">
+                            <div class="review-card-head">
+                                <strong><?php echo htmlspecialchars($maskedName); ?></strong>
+                                <span aria-label="<?php echo $rating; ?> stars"><?php echo str_repeat('★', $rating) . str_repeat('☆', 5 - $rating); ?></span>
+                            </div>
+                            <?php if (trim((string)$review['comment']) !== ''): ?>
+                                <p><?php echo nl2br(htmlspecialchars($review['comment'])); ?></p>
+                            <?php endif; ?>
+                            <small><?php echo htmlspecialchars(substr((string)$review['created_at'], 0, 10)); ?></small>
+                        </article>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </section>
     <?php endif; ?>
@@ -1092,7 +992,7 @@ include 'header.php';
                             <?php endif; ?>
                         </div>
                         <div class="related-product-body">
-                            <small><?php echo ((int)$related['match_count'] > 0) ? '同分類推薦' : '你可能也喜歡'; ?></small>
+       ㄉ                     <small><?php echo ((int)$related['match_count'] > 0) ? '同分類推薦' : '你可能也喜歡'; ?></small>
                             <strong><?php echo htmlspecialchars($related['name']); ?></strong>
                             <span>NT$ <?php echo number_format($relatedPrice); ?></span>
                         </div>

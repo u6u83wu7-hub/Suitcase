@@ -84,6 +84,9 @@
             let ticketId = 0;
             let lastMessageId = 0;
             let isFirstLoad = true;
+            
+            // 💡 新增：從瀏覽器抓取上次「已讀」的最後一筆訊息 ID
+            let lastReadId = parseInt(localStorage.getItem('chat_last_read_id') || '0', 10);
 
             const urlParams = new URLSearchParams(window.location.search);
             const productId = parseInt(urlParams.get('id') || '0', 10) || 0;
@@ -93,6 +96,9 @@
                 panel.classList.toggle('is-open', open);
                 if (open) {
                     toggleBtn.classList.remove('has-unread');
+                    // 💡 新增：當打開面板時，更新已讀的訊息 ID 到 localStorage
+                    localStorage.setItem('chat_last_read_id', lastMessageId);
+                    lastReadId = lastMessageId;
                     scrollToBottom();
                 }
             }
@@ -131,7 +137,6 @@
 
             function sendRequest(action, data) {
                 const body = new URLSearchParams(Object.assign({ action, csrf_token: csrfToken }, data));
-                // 💡 完美修復點：退回上一層，進入 backend 資料夾找 API！
                 return fetch('chat_api.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -145,7 +150,22 @@
                         if (!data.success) return;
                         ticketId = data.ticket_id || 0;
                         messagesBox.innerHTML = '';
-                        (data.messages || []).forEach(appendMessage);
+                        
+                        let hasUnread = false; // 💡 新增：用來判斷初次載入時有沒有未讀訊息
+
+                        (data.messages || []).forEach(msg => {
+                            appendMessage(msg);
+                            // 💡 新增：如果這則訊息是客服發的，而且 ID 大於你上次看過的 ID，代表有未讀！
+                            if (msg.sender_type === 'ADMIN' && parseInt(msg.message_id, 10) > lastReadId) {
+                                hasUnread = true;
+                            }
+                        });
+
+                        // 💡 新增：如果有未讀，且面板目前是關閉的，就補上紅點
+                        if (hasUnread && !panel.classList.contains('is-open')) {
+                            toggleBtn.classList.add('has-unread');
+                        }
+
                         isFirstLoad = false;
                     });
                 } else if (ticketId > 0) {
@@ -160,6 +180,10 @@
                             
                             if (hasNewAdminMsg && !panel.classList.contains('is-open')) {
                                 toggleBtn.classList.add('has-unread');
+                            } else if (panel.classList.contains('is-open')) {
+                                // 💡 新增：如果剛好面板是打開的狀態接收到新訊息，自動幫你標記為已讀
+                                localStorage.setItem('chat_last_read_id', lastMessageId);
+                                lastReadId = lastMessageId;
                             }
                         });
                 }
@@ -177,6 +201,10 @@
                             if (isFirstLoad) isFirstLoad = false;
                             (data.messages || []).forEach(appendMessage);
                             input.value = '';
+                            
+                            // 💡 新增：自己發送訊息後，順便把最新狀態標記為已讀
+                            localStorage.setItem('chat_last_read_id', lastMessageId);
+                            lastReadId = lastMessageId;
                         }
                     })
                     .finally(() => { sendBtn.disabled = false; input.focus(); });

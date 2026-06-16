@@ -23,13 +23,18 @@ if (!function_exists('hpTableExists')) {
 }
 
 $cartBadgeCount = 0;
+$dbMembershipLevel = '1'; // 💡 預設所有人都是一般會員(1)
+
 if (isset($_SESSION['user_id'])) {
     $headerConn = @new mysqli('localhost', 'root', '', 'all_pass_db');
     if (!$headerConn->connect_error) {
         $headerConn->set_charset('utf8mb4');
         apSetDbTimeZone($headerConn);
+        
+        $userId = intval($_SESSION['user_id']);
+
+        // 1. 抓取購物車數量
         if (hpTableExists($headerConn, 'cart_items')) {
-            $userId = intval($_SESSION['user_id']);
             $badgeSql = "SELECT COUNT(*) AS total_qty FROM cart_items WHERE user_id = {$userId}";
             $badgeRes = $headerConn->query($badgeSql);
             if ($badgeRes && $badgeRes->num_rows > 0) {
@@ -37,6 +42,21 @@ if (isset($_SESSION['user_id'])) {
                 $cartBadgeCount = intval($badgeRow['total_qty']);
             }
         }
+
+        // 2. 💡 即時抓取最新會員等級 (解決切換帳號 Bug)
+        if (hpTableExists($headerConn, 'users')) {
+            $levelSql = "SELECT membership_level FROM users WHERE user_id = {$userId} LIMIT 1";
+            $levelRes = $headerConn->query($levelSql);
+            if ($levelRes && $levelRes->num_rows > 0) {
+                $levelRow = $levelRes->fetch_assoc();
+                $dbMembershipLevel = trim((string)$levelRow['membership_level']);
+                if ($dbMembershipLevel === '') {
+                    $dbMembershipLevel = '1';
+                }
+                $_SESSION['membership_level'] = $dbMembershipLevel; // 同步更新 Session，確保其他地方不會錯亂
+            }
+        }
+
         $headerConn->close();
     }
 }
@@ -83,6 +103,28 @@ if (isset($conn) && $conn instanceof mysqli && !$conn->connect_error) {
         .icon-btn { font-size: 22px; cursor: pointer; position: relative; color: #ffffff; transition: color 0.3s; }
         .icon-btn:hover { color: #db6b6b; }
         .cart-badge { position: absolute; top: -5px; right: -8px; background: #db6b6b; color: white; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 50%; }
+
+        /* 👑 VIP 按鈕精緻化設計 */
+        .vip-upgrade-btn {
+            background-color: #db6b6b;
+            color: #ffffff !important;
+            padding: 6px 14px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            white-space: nowrap;
+            margin-left: 15px;
+            box-shadow: 0 4px 10px rgba(219, 107, 107, 0.3);
+            transition: all 0.2s ease;
+        }
+        .vip-upgrade-btn:hover {
+            transform: translateY(-2px);
+            background-color: #b45353;
+            box-shadow: 0 6px 14px rgba(219, 107, 107, 0.5);
+        }
 
         .header-bottom { display: flex; justify-content: center; padding: 15px 0; background-color: #ffffff; border-bottom: 1px solid #e8e8e8; }
         .nav-links { display: flex; gap: 45px; align-items: center; }
@@ -173,13 +215,22 @@ if (isset($conn) && $conn instanceof mysqli && !$conn->connect_error) {
                             <div style="padding: 10px 15px; border-bottom: 1px solid #eee; text-align: center; color: #db6b6b; font-weight: bold; font-size: 14px;">
                                 Hi, <?php echo htmlspecialchars($_SESSION['user_name']); ?>
                             </div>
-                            <a href="profile.php">會員資料</a>
+                            <a href="profile.php">用戶資料</a>
                             <a href="change_password.php">修改密碼</a>
                             <a href="logout.php">登出</a>
                         </div>
                     </div>
                 <?php else: ?>
                     <a href="login.php" class="icon-btn" title="登入">👤</a>
+                <?php endif; ?>
+
+                <?php 
+                // 💡 只有當資料庫真實查詢出來的等級不是 2 或 3 時，才顯示升級按鈕
+                if (!in_array($dbMembershipLevel, ['2', '3', 'VIP', 'VVIP'], true)): 
+                ?>
+                    <a href="upgrade_vip.php" class="vip-upgrade-btn">
+                        👑 升級 VIP
+                    </a>
                 <?php endif; ?>
 
                 <a href="cart.php" class="icon-btn" title="購物車">🛒<span class="cart-badge"><?php echo intval($cartBadgeCount); ?></span></a>

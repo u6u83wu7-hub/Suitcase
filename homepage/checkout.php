@@ -109,14 +109,16 @@ $hasOrderItemSubtotalAmountColumn = in_array('subtotal_amount', $orderItemColumn
 $user = [
     'name' => isset($_SESSION['user_name']) ? $_SESSION['user_name'] : '會員',
     'email' => isset($_SESSION['user_email']) ? $_SESSION['user_email'] : '',
-    'phone' => ''
+    'phone' => '',
+    'points_balance' => 0
 ];
 
-$userRow = checkoutFetchRow($conn, "SELECT name, email, phone FROM users WHERE user_id = {$userId} LIMIT 1");
+$userRow = checkoutFetchRow($conn, "SELECT name, email, phone, points_balance FROM users WHERE user_id = {$userId} LIMIT 1");
 if ($userRow) {
     $user['name'] = $userRow['name'] !== null ? $userRow['name'] : $user['name'];
     $user['email'] = $userRow['email'] !== null ? $userRow['email'] : $user['email'];
     $user['phone'] = $userRow['phone'] !== null ? $userRow['phone'] : '';
+    $user['points_balance'] = isset($userRow['points_balance']) ? intval($userRow['points_balance']) : 0;
 }
 
 $memberDetail = [
@@ -272,6 +274,7 @@ $formExpiryMonth = $_POST['expiry_month'] ?? $defaultCardExpiryMonth;
 $formExpiryYear = $_POST['expiry_year'] ?? $defaultCardExpiryYear;
 $formNote = $_POST['note'] ?? '';
 $formCouponId = isset($_POST['coupon_id']) ? intval($_POST['coupon_id']) : 0;
+$formUsePoints = isset($_POST['use_points']) ? intval($_POST['use_points']) : 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'place_order') {
     if (!apValidateCsrf()) {
@@ -310,8 +313,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $errors[] = '請輸入信用卡到期年。';
     }
 
+    // 💡 點數防呆檢測
+    if ($formUsePoints < 0) $formUsePoints = 0;
+    if ($formUsePoints > $user['points_balance']) $formUsePoints = $user['points_balance'];
+
     if (empty($errors)) {
-        $shippingFee = 0.00;
+        // 💡 運費邏輯：滿 3000 免運，否則 100 元
+        $shippingFee = ($totalAmount > 3000) ? 0.00 : 100.00;
+        
         $appliedCouponId = null;
         $discountAmount = 0.00;
         $rewardPoints = 0;
@@ -360,8 +369,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             }
         }
 
+        // 確保優惠卷不會扣到變負數
         $discountAmount = min(max($discountAmount, 0.00), $totalAmount + $shippingFee);
-        $grandTotal = max(round($totalAmount + $shippingFee - $discountAmount, 2), 0.00);
+        
+        // 💡 計算最終折抵 (優惠卷 + 紅利點數)
+        $remainingTotal = max(0, $totalAmount + $shippingFee - $discountAmount);
+        $pointsToUse = min($formUsePoints, $remainingTotal); // 點數最多只能扣到總額為0
+        
+        $totalDiscountAmount = $discountAmount + $pointsToUse; // 資料庫紀錄的總折扣
+        $grandTotal = max(round($totalAmount + $shippingFee - $totalDiscountAmount, 2), 0.00);
+        
         $paymentMethod = 'credit_card';
         $formCardLast4 = substr($cardDigits, -4);
 
@@ -391,7 +408,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $totalAmount,
                 $shippingFee,
                 $appliedCouponId,
-                $discountAmount,
+                $totalDiscountAmount, // 💡 寫入包含點數折抵的總折扣
                 $grandTotal,
                 $formRecipientName,
                 $formRecipientPhone,
@@ -423,8 +440,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $orderColumnsList[] = 'note';
                 $orderValues[] = $hasShippingNotesColumn ? $formNote : $combinedNote;
                 $orderTypes .= 's';
-            } elseif (!$hasShippingNotesColumn) {
-                // If the legacy table has neither note column, we still keep the extra text locally.
             }
 
             $orderSql = 'INSERT INTO orders (' . implode(', ', $orderColumnsList) . ') VALUES (' . implode(', ', array_fill(0, count($orderColumnsList), '?')) . ')';
@@ -587,6 +602,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $markInventoryStmt->close();
             }
 
+            // 扣除優惠卷
             if ($appliedCouponId !== null) {
                 $distributionStmt = $conn->prepare(
                     "SELECT distribution_id, quantity
@@ -636,14 +652,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
             }
 
+            // 💡 扣除使用的紅利點數
+            if ($pointsToUse > 0) {
+                $deductPointsStmt = $conn->prepare("UPDATE users SET points_balance = points_balance - ? WHERE user_id = ?");
+                if (!$deductPointsStmt) {
+                    throw new RuntimeException('扣除會員點數失敗。');
+                }
+                $deductPointsStmt->bind_param('ii', $pointsToUse, $userId);
+                if (!$deductPointsStmt->execute()) {
+                    throw new RuntimeException('扣除會員點數失敗。');
+                }
+                $deductPointsStmt->close();
+            }
+
+            // 發送優惠卷產生的紅利獎勵 (若有)
             if ($rewardPoints > 0) {
                 $pointStmt = $conn->prepare("UPDATE users SET points_balance = points_balance + ? WHERE user_id = ?");
                 if (!$pointStmt) {
-                    throw new RuntimeException('更新會員點數失敗。');
+                    throw new RuntimeException('更新會員獎勵點數失敗。');
                 }
                 $pointStmt->bind_param('ii', $rewardPoints, $userId);
                 if (!$pointStmt->execute()) {
-                    throw new RuntimeException('更新會員點數失敗。');
+                    throw new RuntimeException('更新會員獎勵點數失敗。');
                 }
                 $pointStmt->close();
             }
@@ -677,6 +707,12 @@ $memberFillData = [
     'expiry_month' => $memberDetail['expiry_month'],
     'expiry_year' => $memberDetail['expiry_year'],
 ];
+
+// 💡 取得已儲存的卡號末4碼以供初始預覽
+$initialCardPreview = '尚未填入';
+if (!empty($memberDetail['card_last4'])) {
+    $initialCardPreview = '****' . $memberDetail['card_last4'];
+}
 
 $missingMemberFields = [];
 if ($memberFillData['recipient_name'] === '') {
@@ -748,11 +784,10 @@ include 'header.php';
         white-space: nowrap;
     }
     .coupon-summary {
-        margin-top: 14px;
-        padding: 14px 16px;
-        border-radius: 12px;
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
+        padding: 0;
+        border-radius: 0;
+        background: transparent;
+        border: none;
     }
     .coupon-summary-row {
         display: flex;
@@ -768,7 +803,7 @@ include 'header.php';
     .coupon-summary-total {
         font-size: 18px;
         font-weight: 800;
-        color: #111827;
+        color: #db6b6b;
     }
 </style>
 
@@ -800,53 +835,118 @@ include 'header.php';
             <?php endforeach; ?>
 
             <div style="display:grid; grid-template-columns:1.1fr 0.9fr; gap:18px; align-items:start;">
-                <section style="background:#fff; border:1px solid #eee; border-radius:14px; overflow:auto;">
-                    <div style="padding:18px 18px 0; font-size:20px; font-weight:700;">勾選商品</div>
-                    <table style="width:100%; border-collapse:collapse; min-width:760px; margin-top:10px;">
-                        <thead>
-                            <tr style="background:#fafafa; border-bottom:1px solid #eee; text-align:left; color:#666; font-size:14px;">
-                                <th style="padding:14px 12px; width:100px;">商品</th>
-                                <th style="padding:14px 12px;">名稱 / 規格</th>
-                                <th style="padding:14px 12px; width:140px;">單價</th>
-                                <th style="padding:14px 12px; width:120px;">數量</th>
-                                <th style="padding:14px 12px; width:140px;">小計</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($items as $item): ?>
-                                <?php
-                                $imageUrl = $item['image_url'] !== '' ? '../' . ltrim($item['image_url'], '/') : '';
-                                $variantLabel = trim(($item['variant_size'] !== '' ? $item['variant_size'] . '吋' : '') . (($item['variant_color'] !== '' && $item['variant_size'] !== '') ? ' / ' : '') . ($item['variant_color'] !== '' ? $item['variant_color'] : ''));
-                                ?>
-                                <tr style="border-bottom:1px solid #f3f3f3; vertical-align:top;">
-                                    <td style="padding:14px 12px;">
-                                        <?php if ($imageUrl !== ''): ?>
-                                            <img src="<?php echo htmlspecialchars($imageUrl); ?>" alt="<?php echo htmlspecialchars($item['product_name']); ?>" style="width:84px; height:84px; object-fit:cover; border-radius:10px; border:1px solid #eee;">
-                                        <?php else: ?>
-                                            <div style="width:84px; height:84px; border-radius:10px; border:1px solid #eee; background:#f7f7f7; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:12px;">No Img</div>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td style="padding:14px 12px;">
-                                        <div style="font-weight:700; margin-bottom:6px; color:#222;"><?php echo htmlspecialchars($item['product_name']); ?></div>
-                                        <div style="font-size:13px; color:#777; line-height:1.7;">
-                                            <?php if ($variantLabel !== ''): ?>
-                                                <div>規格：<?php echo htmlspecialchars($variantLabel); ?></div>
-                                            <?php endif; ?>
-                                            <div>SKU：<?php echo htmlspecialchars($item['sku_code'] !== '' ? $item['sku_code'] : '-'); ?></div>
-                                        </div>
-                                    </td>
-                                    <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['display_price'])); ?></td>
-                                    <td style="padding:14px 12px;">x<?php echo intval($item['quantity']); ?></td>
-                                    <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['subtotal'])); ?></td>
+                
+                <div style="display:grid; gap:16px;">
+                    <section style="background:#fff; border:1px solid #eee; border-radius:14px; overflow:auto;">
+                        <div style="padding:18px 18px 0; font-size:20px; font-weight:700;">勾選商品</div>
+                        <table style="width:100%; border-collapse:collapse; min-width:760px; margin-top:10px;">
+                            <thead>
+                                <tr style="background:#fafafa; border-bottom:1px solid #eee; text-align:left; color:#666; font-size:14px;">
+                                    <th style="padding:14px 12px; width:100px;">商品</th>
+                                    <th style="padding:14px 12px;">名稱 / 規格</th>
+                                    <th style="padding:14px 12px; width:140px;">單價</th>
+                                    <th style="padding:14px 12px; width:120px;">數量</th>
+                                    <th style="padding:14px 12px; width:140px;">小計</th>
                                 </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($items as $item): ?>
+                                    <?php
+                                    $imageUrl = $item['image_url'] !== '' ? '../' . ltrim($item['image_url'], '/') : '';
+                                    $variantLabel = trim(($item['variant_size'] !== '' ? $item['variant_size'] . '吋' : '') . (($item['variant_color'] !== '' && $item['variant_size'] !== '') ? ' / ' : '') . ($item['variant_color'] !== '' ? $item['variant_color'] : ''));
+                                    ?>
+                                    <tr style="border-bottom:1px solid #f3f3f3; vertical-align:top;">
+                                        <td style="padding:14px 12px;">
+                                            <?php if ($imageUrl !== ''): ?>
+                                                <img src="<?php echo htmlspecialchars($imageUrl); ?>" alt="<?php echo htmlspecialchars($item['product_name']); ?>" style="width:84px; height:84px; object-fit:cover; border-radius:10px; border:1px solid #eee;">
+                                            <?php else: ?>
+                                                <div style="width:84px; height:84px; border-radius:10px; border:1px solid #eee; background:#f7f7f7; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:12px;">No Img</div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td style="padding:14px 12px;">
+                                            <div style="font-weight:700; margin-bottom:6px; color:#222;"><?php echo htmlspecialchars($item['product_name']); ?></div>
+                                            <div style="font-size:13px; color:#777; line-height:1.7;">
+                                                <?php if ($variantLabel !== ''): ?>
+                                                    <div>規格：<?php echo htmlspecialchars($variantLabel); ?></div>
+                                                <?php endif; ?>
+                                                <div>SKU：<?php echo htmlspecialchars($item['sku_code'] !== '' ? $item['sku_code'] : '-'); ?></div>
+                                            </div>
+                                        </td>
+                                        <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['display_price'])); ?></td>
+                                        <td style="padding:14px 12px;">x<?php echo intval($item['quantity']); ?></td>
+                                        <td style="padding:14px 12px; font-weight:700;">NT$ <?php echo number_format(floatval($item['subtotal'])); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </section>
 
-                    <div style="display:flex; justify-content:flex-end; padding:16px 18px 18px; font-size:18px; font-weight:700; color:#222;">
-                        商品總額：NT$ <?php echo number_format($totalAmount); ?>
-                    </div>
-                </section>
+                    <section style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+                            <h3 style="font-size:18px; margin:0;">使用優惠卷</h3>
+                            <div style="font-size:13px; color:#6b7280;">選好後會即時顯示卷後價</div>
+                        </div>
+
+                        <?php if (!empty($availableCoupons)): ?>
+                            <div id="couponOptions" style="display:grid; gap:10px;">
+                                <label class="coupon-option <?php echo $formCouponId <= 0 ? 'is-selected' : ''; ?>">
+                                    <input type="radio" name="coupon_id" value="" <?php echo $formCouponId <= 0 ? 'checked' : ''; ?>>
+                                    <div class="coupon-option-main">
+                                        <div class="coupon-option-title">不使用優惠卷</div>
+                                        <div class="coupon-option-sub">保留原價結帳</div>
+                                    </div>
+                                </label>
+
+                                <?php foreach ($availableCoupons as $coupon): ?>
+                                    <?php
+                                    $couponId = intval($coupon['coupon_id']);
+                                    $couponType = $coupon['coupon_type'] ?? 'DISCOUNT';
+                                    $couponValue = (float)($coupon['coupon_value'] ?? 0);
+                                    $minOrderAmount = (float)($coupon['min_order_amount'] ?? 0);
+                                    $availableQuantity = intval($coupon['available_quantity'] ?? 0);
+                                    $valueLabel = $couponType === 'REDUCE'
+                                        ? '折抵 NT$ ' . number_format($couponValue)
+                                        : ($couponType === 'POINTS' ? number_format($couponValue) . ' 點' : rtrim(rtrim(number_format($couponValue, 2), '0'), '.') . '% 折扣');
+                                    $couponTitle = trim(($coupon['coupon_name'] ?? '未命名優惠卷') . (!empty($coupon['coupon_code']) ? '（' . $coupon['coupon_code'] . '）' : ''));
+                                    $selectedClass = $formCouponId === $couponId ? 'is-selected' : '';
+                                    ?>
+                                    <label class="coupon-option <?php echo $selectedClass; ?>">
+                                        <input type="radio"
+                                               name="coupon_id"
+                                               value="<?php echo $couponId; ?>"
+                                               <?php echo $formCouponId === $couponId ? 'checked' : ''; ?>
+                                               data-coupon-type="<?php echo htmlspecialchars($couponType); ?>"
+                                               data-coupon-value="<?php echo htmlspecialchars((string)$couponValue); ?>"
+                                               data-min-order="<?php echo htmlspecialchars((string)$minOrderAmount); ?>">
+                                        <div class="coupon-option-main">
+                                            <div class="coupon-option-title"><?php echo htmlspecialchars($couponTitle); ?></div>
+                                            <div class="coupon-option-sub"><?php echo htmlspecialchars($valueLabel); ?></div>
+                                        </div>
+                                        <div class="coupon-option-meta">
+                                            <div>可用 <?php echo number_format($availableQuantity); ?> 張</div>
+                                            <div>門檻 NT$ <?php echo number_format($minOrderAmount); ?></div>
+                                        </div>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <div style="padding:14px 16px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; color:#64748b; line-height:1.7;">
+                                目前沒有可用的優惠卷。
+                            </div>
+                        <?php endif; ?>
+
+                        <hr style="border:none; border-top:1px solid #eee; margin:20px 0;">
+                        
+                        <h3 style="font-size:18px; margin:0 0 12px 0;">使用紅利點數</h3>
+                        <div style="font-size:14px; color:#444; display:flex; align-items:center; flex-wrap:wrap; gap:10px;">
+                            <span>您目前有 <strong style="color:#db6b6b; font-size:16px;"><?php echo number_format($user['points_balance']); ?></strong> 點</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <input type="number" id="use_points" name="use_points" min="0" max="<?php echo $user['points_balance']; ?>" value="<?php echo intval($formUsePoints); ?>" style="width:100px; padding:8px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px;" placeholder="輸入點數">
+                                <span>(1點 = NT$ 1)</span>
+                            </div>
+                        </div>
+                    </section>
+                </div>
 
                 <section style="display:grid; gap:16px;">
                     <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px;">
@@ -872,71 +972,6 @@ include 'header.php';
                             <div>
                                 <label style="display:block; font-weight:700; margin-bottom:6px;">地址備註</label>
                                 <input type="text" name="address_note" id="address_note" value="<?php echo htmlspecialchars($formAddressNote); ?>" style="width:100%; height:44px; padding:0 12px; border:1px solid #ddd; border-radius:10px;">
-                            </div>
-                            <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px;">
-                                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-                                    <h3 style="font-size:18px; margin:0;">使用優惠卷</h3>
-                                    <div style="font-size:13px; color:#6b7280;">選好後會即時顯示卷後價</div>
-                                </div>
-
-                                <?php if (!empty($availableCoupons)): ?>
-                                    <div id="couponOptions" style="display:grid; gap:10px;">
-                                        <label class="coupon-option <?php echo $formCouponId <= 0 ? 'is-selected' : ''; ?>">
-                                            <input type="radio" name="coupon_id" value="" <?php echo $formCouponId <= 0 ? 'checked' : ''; ?>>
-                                            <div class="coupon-option-main">
-                                                <div class="coupon-option-title">不使用優惠卷</div>
-                                                <div class="coupon-option-sub">保留原價結帳</div>
-                                            </div>
-                                        </label>
-
-                                        <?php foreach ($availableCoupons as $coupon): ?>
-                                            <?php
-                                            $couponId = intval($coupon['coupon_id']);
-                                            $couponType = $coupon['coupon_type'] ?? 'DISCOUNT';
-                                            $couponValue = (float)($coupon['coupon_value'] ?? 0);
-                                            $minOrderAmount = (float)($coupon['min_order_amount'] ?? 0);
-                                            $availableQuantity = intval($coupon['available_quantity'] ?? 0);
-                                            $valueLabel = $couponType === 'REDUCE'
-                                                ? '折抵 NT$ ' . number_format($couponValue)
-                                                : ($couponType === 'POINTS' ? number_format($couponValue) . ' 點' : rtrim(rtrim(number_format($couponValue, 2), '0'), '.') . '% 折扣');
-                                            $couponTitle = trim(($coupon['coupon_name'] ?? '未命名優惠卷') . (!empty($coupon['coupon_code']) ? '（' . $coupon['coupon_code'] . '）' : ''));
-                                            $selectedClass = $formCouponId === $couponId ? 'is-selected' : '';
-                                        ?>
-                                            <label class="coupon-option <?php echo $selectedClass; ?>">
-                                                <input type="radio"
-                                                       name="coupon_id"
-                                                       value="<?php echo $couponId; ?>"
-                                                       <?php echo $formCouponId === $couponId ? 'checked' : ''; ?>
-                                                       data-coupon-type="<?php echo htmlspecialchars($couponType); ?>"
-                                                       data-coupon-value="<?php echo htmlspecialchars((string)$couponValue); ?>"
-                                                       data-min-order="<?php echo htmlspecialchars((string)$minOrderAmount); ?>">
-                                                <div class="coupon-option-main">
-                                                    <div class="coupon-option-title"><?php echo htmlspecialchars($couponTitle); ?></div>
-                                                    <div class="coupon-option-sub"><?php echo htmlspecialchars($valueLabel); ?></div>
-                                                </div>
-                                                <div class="coupon-option-meta">
-                                                    <div>可用 <?php echo number_format($availableQuantity); ?> 張</div>
-                                                    <div>門檻 NT$ <?php echo number_format($minOrderAmount); ?></div>
-                                                </div>
-                                            </label>
-                                        <?php endforeach; ?>
-                                    </div>
-
-                                    <div class="coupon-summary">
-                                        <div class="coupon-summary-row"><span>商品總額</span><strong id="couponBaseAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
-                                        <div class="coupon-summary-row"><span>優惠折扣</span><strong id="couponDiscountAmount">NT$ 0</strong></div>
-                                        <div class="coupon-summary-row coupon-summary-total"><span>卷後價</span><strong id="couponFinalAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
-                                    </div>
-                                <?php else: ?>
-                                    <div style="padding:14px 16px; border-radius:12px; background:#f8fafc; border:1px solid #e2e8f0; color:#64748b; line-height:1.7;">
-                                        目前沒有可用的優惠卷。
-                                    </div>
-                                    <div class="coupon-summary">
-                                        <div class="coupon-summary-row"><span>商品總額</span><strong id="couponBaseAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
-                                        <div class="coupon-summary-row"><span>優惠折扣</span><strong id="couponDiscountAmount">NT$ 0</strong></div>
-                                        <div class="coupon-summary-row coupon-summary-total"><span>卷後價</span><strong id="couponFinalAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
-                                    </div>
-                                <?php endif; ?>
                             </div>
                             <div>
                                 <label style="display:block; font-weight:700; margin-bottom:6px;">付款方式</label>
@@ -964,6 +999,10 @@ include 'header.php';
                                 <label style="display:block; font-weight:700; margin-bottom:6px;">信用卡號</label>
                                 <input type="text" name="card_number" id="card_number" value="<?php echo htmlspecialchars($formCardNumber); ?>" required autocomplete="off" inputmode="numeric" placeholder="請輸入完整卡號" style="width:100%; height:44px; padding:0 12px; border:1px solid #ddd; border-radius:10px;">
                             </div>
+                            <div>
+                                <label style="display:block; font-weight:700; margin-bottom:6px;">安全碼 (CVV)</label>
+                                <input type="text" name="card_cvv" id="card_cvv" value="" required autocomplete="off" inputmode="numeric" maxlength="4" placeholder="請輸入安全碼" style="width:100%; height:44px; padding:0 12px; border:1px solid #ddd; border-radius:10px;">
+                            </div>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                                 <div>
                                     <label style="display:block; font-weight:700; margin-bottom:6px;">到期月</label>
@@ -983,14 +1022,25 @@ include 'header.php';
 
                     <div style="background:#fff; border:1px solid #eee; border-radius:14px; padding:18px;">
                         <h2 style="font-size:20px; margin-bottom:12px;">結帳確認</h2>
-                        <div style="line-height:1.8; color:#444; font-size:14px; margin-bottom:12px;">
-                            <div><strong>收件人：</strong><?php echo htmlspecialchars($formRecipientName); ?></div>
-                            <div><strong>電話：</strong><?php echo htmlspecialchars($formRecipientPhone); ?></div>
-                            <div><strong>地址：</strong><?php echo htmlspecialchars($formShippingAddress); ?></div>
-                            <div><strong>卡片末 4 碼：</strong><?php echo htmlspecialchars($memberDetail['card_last4'] !== '' ? '****' . $memberDetail['card_last4'] : '尚未填入'); ?></div>
+                        
+                        <div style="line-height:1.8; color:#444; font-size:14px; margin-bottom:16px; border-bottom:1px solid #eee; padding-bottom:16px;">
+                            <div><strong>收件人：</strong><span id="previewRecipient"><?php echo htmlspecialchars($formRecipientName); ?></span></div>
+                            <div><strong>電話：</strong><span id="previewPhone"><?php echo htmlspecialchars($formRecipientPhone); ?></span></div>
+                            <div><strong>地址：</strong><span id="previewAddress"><?php echo htmlspecialchars($formShippingAddress); ?></span></div>
+                            <div><strong>卡片末 4 碼：</strong><span id="cardPreview"><?php echo htmlspecialchars($initialCardPreview); ?></span></div>
                         </div>
+                        
+                        <div class="coupon-summary" style="margin-bottom:18px;">
+                            <div class="coupon-summary-row"><span>商品總額</span><strong id="couponBaseAmount">NT$ <?php echo number_format((float)$totalAmount); ?></strong></div>
+                            <div class="coupon-summary-row"><span>運費 <small style="color:#888;">(滿3000免運)</small></span><strong id="shippingFeeAmount">NT$ <?php echo number_format($totalAmount > 3000 ? 0 : 100); ?></strong></div>
+                            <div class="coupon-summary-row"><span>優惠卷折扣</span><strong id="couponDiscountAmount" style="color:#16a34a;">- NT$ 0</strong></div>
+                            <div class="coupon-summary-row"><span>紅利折抵</span><strong id="pointsDiscountAmount" style="color:#16a34a;">- NT$ 0</strong></div>
+                            <hr style="border:none; border-top:1px dashed #ddd; margin:12px 0;">
+                            <div class="coupon-summary-row coupon-summary-total"><span>結帳總額</span><strong id="couponFinalAmount">NT$ <?php echo number_format($totalAmount + ($totalAmount > 3000 ? 0 : 100)); ?></strong></div>
+                        </div>
+
                         <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
-                            <a href="cart.php" style="display:inline-flex; align-items:center; justify-content:center; padding:12px 18px; border-radius:999px; background:#111; color:#fff; font-weight:700;">回購物車修改</a>
+                            <a href="cart.php" style="display:inline-flex; align-items:center; justify-content:center; padding:12px 18px; border-radius:999px; background:#f3f4f6; color:#111; font-weight:700;">回購物車</a>
                             <button type="submit" style="padding:12px 18px; border:none; border-radius:999px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">確認結帳</button>
                         </div>
                     </div>
@@ -1003,11 +1053,17 @@ include 'header.php';
 <script>
 (function () {
     const subtotal = <?php echo json_encode((float)$totalAmount, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const maxPoints = <?php echo json_encode(intval($user['points_balance']), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    
     const baseAmountEl = document.getElementById('couponBaseAmount');
+    const shippingFeeEl = document.getElementById('shippingFeeAmount');
     const discountAmountEl = document.getElementById('couponDiscountAmount');
+    const pointsDiscountEl = document.getElementById('pointsDiscountAmount');
     const finalAmountEl = document.getElementById('couponFinalAmount');
+    
     const couponCards = Array.from(document.querySelectorAll('.coupon-option'));
     const couponRadios = Array.from(document.querySelectorAll('input[name="coupon_id"]'));
+    const pointsInput = document.getElementById('use_points');
 
     function formatAmount(value) {
         return 'NT$ ' + Math.max(0, Number(value) || 0).toLocaleString('zh-TW', {
@@ -1042,18 +1098,29 @@ include 'header.php';
 
     function syncCouponPreview() {
         const selectedRadio = couponRadios.find((radio) => radio.checked) || null;
-        const discount = calculateDiscount(selectedRadio);
-        const finalAmount = Math.max(0, Math.round((subtotal - discount) * 100) / 100);
+        let couponDiscount = calculateDiscount(selectedRadio);
+        
+        // 運費邏輯
+        const shippingFee = subtotal > 3000 ? 0 : 100;
+        
+        // 紅利折抵邏輯
+        let usePoints = parseInt(pointsInput.value) || 0;
+        if (usePoints < 0) usePoints = 0;
+        if (usePoints > maxPoints) usePoints = maxPoints;
+        
+        // 總折抵不能大於 (商品總額 + 運費 - 優惠卷折扣)
+        const maxUsablePoints = Math.max(0, subtotal + shippingFee - couponDiscount);
+        if (usePoints > maxUsablePoints) {
+            usePoints = Math.floor(maxUsablePoints);
+        }
 
-        if (baseAmountEl) {
-            baseAmountEl.textContent = formatAmount(subtotal);
-        }
-        if (discountAmountEl) {
-            discountAmountEl.textContent = formatAmount(discount);
-        }
-        if (finalAmountEl) {
-            finalAmountEl.textContent = formatAmount(finalAmount);
-        }
+        const finalAmount = Math.max(0, Math.round((subtotal + shippingFee - couponDiscount - usePoints) * 100) / 100);
+
+        if (baseAmountEl) baseAmountEl.textContent = formatAmount(subtotal);
+        if (shippingFeeEl) shippingFeeEl.textContent = formatAmount(shippingFee);
+        if (discountAmountEl) discountAmountEl.textContent = '- ' + formatAmount(couponDiscount);
+        if (pointsDiscountEl) pointsDiscountEl.textContent = '- ' + formatAmount(usePoints);
+        if (finalAmountEl) finalAmountEl.textContent = formatAmount(finalAmount);
 
         couponCards.forEach((card) => {
             const radio = card.querySelector('input[type="radio"]');
@@ -1064,6 +1131,10 @@ include 'header.php';
     couponRadios.forEach((radio) => {
         radio.addEventListener('change', syncCouponPreview);
     });
+    
+    if (pointsInput) {
+        pointsInput.addEventListener('input', syncCouponPreview);
+    }
 
     syncCouponPreview();
 })();
@@ -1099,12 +1170,50 @@ include 'header.php';
         if (missingFields.length > 0) {
             notes.push('以下會員資料尚未完整：' + missingFields.join('、') + '。');
         }
-        notes.push('信用卡號不會自動填入，請手動輸入完整卡號。');
+        notes.push('信用卡號與安全碼請手動輸入。');
         notice.innerHTML = notes.map(function (item) {
             return '<div>• ' + item + '</div>';
         }).join('');
         notice.style.display = 'block';
     });
+})();
+
+(function () {
+    function maskLast4(num) {
+        if (!num) return '';
+        var cleaned = String(num).replace(/\s+/g, '');
+        return '****' + cleaned.slice(-4);
+    }
+
+    var recipientEl = document.getElementById('recipient_name');
+    var phoneEl = document.getElementById('recipient_phone');
+    var addressEl = document.getElementById('shipping_address');
+    var cardEl = document.getElementById('card_number');
+
+    var previewRecipient = document.getElementById('previewRecipient');
+    var previewPhone = document.getElementById('previewPhone');
+    var previewAddress = document.getElementById('previewAddress');
+    var cardPreview = document.getElementById('cardPreview');
+
+    function updatePreview() {
+        if (previewRecipient) previewRecipient.textContent = (recipientEl && recipientEl.value) ? recipientEl.value : '<?php echo htmlspecialchars($defaultRecipientName); ?>';
+        if (previewPhone) previewPhone.textContent = (phoneEl && phoneEl.value) ? phoneEl.value : '<?php echo htmlspecialchars($defaultRecipientPhone); ?>';
+        if (previewAddress) previewAddress.textContent = (addressEl && addressEl.value) ? addressEl.value : '<?php echo htmlspecialchars($defaultShippingAddress); ?>';
+        if (cardPreview) {
+            var val = (cardEl && cardEl.value) ? cardEl.value.trim() : '';
+            if (val.length >= 4) {
+                cardPreview.textContent = maskLast4(val);
+            } else {
+                cardPreview.textContent = '<?php echo htmlspecialchars($initialCardPreview); ?>';
+            }
+        }
+    }
+
+    [recipientEl, phoneEl, addressEl, cardEl].forEach(function (el) {
+        if (el) el.addEventListener('input', updatePreview);
+    });
+
+    updatePreview();
 })();
 </script>
 

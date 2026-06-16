@@ -88,7 +88,7 @@ if (tableExists($conn, 'users')) {
 $userLevel = $user['membership_level'] !== '' ? $conn->real_escape_string($user['membership_level']) : '一般會員';
 
 // ==========================================
-// 💡 處理前端的 POST 請求 (領取與兌換優惠卷)
+// 💡 處理前端的 POST 請求 (領取、兌換優惠卷、送出評論與確認訂單)
 // ==========================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -257,6 +257,113 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $couponRedirect('error', $e->getMessage());
         }
     }
+
+    if ($action === 'submit_profile_review') {
+        $reviewOrderId = (int)($_POST['order_id'] ?? 0);
+        $reviewProductId = (int)($_POST['product_id'] ?? 0);
+        $rating = max(1, min(5, (int)($_POST['rating'] ?? 5)));
+        $comment = trim((string)($_POST['comment'] ?? ''));
+        $rewardPoints = 50; // 設定評論可獲得的紅利點數
+
+        if ($reviewOrderId <= 0 || $reviewProductId <= 0) {
+            $couponRedirect('error', '資料錯誤，請重新操作。');
+        }
+
+        $conn->begin_transaction();
+        try {
+            $checkStmt = $conn->prepare("
+                SELECT o.order_id 
+                FROM orders o
+                JOIN order_items oi ON o.order_id = oi.order_id
+                JOIN product_variants pv ON oi.variant_id = pv.variant_id
+                LEFT JOIN product_reviews pr ON pr.order_id = o.order_id AND pr.product_id = pv.product_id
+                WHERE o.user_id = ? AND o.order_id = ? AND pv.product_id = ? 
+                  AND o.status IN ('DELIVERED', 'COMPLETED')
+                  AND pr.review_id IS NULL
+                LIMIT 1
+            ");
+            $checkStmt->bind_param('iii', $userId, $reviewOrderId, $reviewProductId);
+            $checkStmt->execute();
+            $isValid = $checkStmt->get_result()->num_rows > 0;
+            $checkStmt->close();
+
+            if (!$isValid) {
+                throw new RuntimeException('找不到符合條件的待評論商品，或您已經評論過了。');
+            }
+
+            // 寫入評論
+            $insertReview = $conn->prepare("INSERT INTO product_reviews (product_id, user_id, order_id, rating, comment, is_visible) VALUES (?, ?, ?, ?, ?, 1)");
+            $insertReview->bind_param('iiiis', $reviewProductId, $userId, $reviewOrderId, $rating, $comment);
+            if (!$insertReview->execute()) throw new RuntimeException('評論送出失敗。');
+            $insertReview->close();
+
+            // 發放紅利點數
+            $updatePoints = $conn->prepare("UPDATE users SET points_balance = points_balance + ? WHERE user_id = ?");
+            $updatePoints->bind_param('ii', $rewardPoints, $userId);
+            if (!$updatePoints->execute()) throw new RuntimeException('點數發放失敗。');
+            $updatePoints->close();
+
+            $conn->commit();
+            $couponRedirect('success', '評論已成功送出！獲得 ' . $rewardPoints . ' 點紅利。');
+        } catch (Throwable $e) {
+            $conn->rollback();
+            $couponRedirect('error', $e->getMessage());
+        }
+    }
+
+    // 💡 內聚整合：在這裡直接處理「確認完成訂單」
+    if ($action === 'complete_order') {
+        $orderId = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        if ($orderId <= 0) {
+            $couponRedirect('error', '無效的訂單。');
+        }
+
+        $conn->begin_transaction();
+        try {
+            // 1. 驗證訂單歸屬與狀態是否為 DELIVERED
+            $stmt = $conn->prepare("SELECT total_amount FROM orders WHERE order_id = ? AND user_id = ? AND status = 'DELIVERED' FOR UPDATE");
+            $stmt->bind_param('ii', $orderId, $userId);
+            $stmt->execute();
+            $orderRes = $stmt->get_result();
+            $order = $orderRes->fetch_assoc();
+            $stmt->close();
+
+            if (!$order) {
+                throw new RuntimeException('找不到該訂單，或訂單狀態非待確認。');
+            }
+
+            // 2. 更新狀態為 COMPLETED
+            $updateOrder = $conn->prepare("UPDATE orders SET status = 'COMPLETED' WHERE order_id = ?");
+            $updateOrder->bind_param('i', $orderId);
+            if (!$updateOrder->execute()) throw new RuntimeException('更新訂單狀態失敗。');
+            $updateOrder->close();
+
+            // 3. 計算 1% 消費回饋點數
+            $rewardPoints = max(1, floor((float)$order['total_amount'] * 0.01));
+
+            // 發放點數
+            $updatePoints = $conn->prepare("UPDATE users SET points_balance = points_balance + ? WHERE user_id = ?");
+            $updatePoints->bind_param('ii', $rewardPoints, $userId);
+            if (!$updatePoints->execute()) throw new RuntimeException('點數回饋發放失敗。');
+            $updatePoints->close();
+
+            // 4. 寫入站內消息通知
+            if (tableExists($conn, 'user_notifications')) {
+                $title = "🎉 訂單完成與點數入帳通知";
+                $msg = "您的訂單 (#" . $orderId . ") 已確認完成！感謝您的購買，系統已發放 " . $rewardPoints . " 點紅利點數至您的帳戶。別忘了前往下方填寫評價賺取額外紅利喔！";
+                $notifyStmt = $conn->prepare("INSERT INTO user_notifications (user_id, title, message) VALUES (?, ?, ?)");
+                $notifyStmt->bind_param('iss', $userId, $title, $msg);
+                $notifyStmt->execute();
+                $notifyStmt->close();
+            }
+
+            $conn->commit();
+            $couponRedirect('success', "訂單已確認完成！恭喜獲得 {$rewardPoints} 點紅利回饋。");
+        } catch (Throwable $e) {
+            $conn->rollback();
+            $couponRedirect('error', $e->getMessage());
+        }
+    }
 }
 
 $cartRows = [];
@@ -289,6 +396,42 @@ if (tableExists($conn, 'orders')) {
     $orderRows = fetchAssocRows($conn, "SELECT order_id, order_number, status, total_amount, created_at FROM orders WHERE user_id = {$userId} ORDER BY created_at DESC");
 }
 
+// 💡 撈取「待評論」商品 (已送達或已完成，且無評論紀錄)
+$pendingReviews = [];
+if (tableExists($conn, 'product_reviews')) {
+    $pendingSql = "
+        SELECT 
+            o.order_id, o.order_number, o.created_at AS order_date,
+            p.product_id, p.name AS product_name,
+            MIN(pi.image_url) AS image_url
+        FROM orders o
+        JOIN order_items oi ON o.order_id = oi.order_id
+        JOIN product_variants pv ON oi.variant_id = pv.variant_id
+        JOIN products p ON pv.product_id = p.product_id
+        LEFT JOIN product_images pi ON p.product_id = pi.product_id AND pi.is_main = 1
+        LEFT JOIN product_reviews pr ON pr.order_id = o.order_id AND pr.product_id = p.product_id
+        WHERE o.user_id = {$userId} 
+          AND o.status IN ('DELIVERED', 'COMPLETED') 
+          AND pr.review_id IS NULL
+        GROUP BY o.order_id, p.product_id
+        ORDER BY o.created_at DESC
+    ";
+    $pendingReviews = fetchAssocRows($conn, $pendingSql);
+}
+
+// 💡 撈取「我的歷史評論」
+$myReviews = [];
+if (tableExists($conn, 'product_reviews')) {
+    $myReviewsSql = "
+        SELECT pr.rating, pr.comment, pr.created_at, p.product_id, p.name AS product_name
+        FROM product_reviews pr
+        JOIN products p ON pr.product_id = p.product_id
+        WHERE pr.user_id = {$userId}
+        ORDER BY pr.created_at DESC
+    ";
+    $myReviews = fetchAssocRows($conn, $myReviewsSql);
+}
+
 // 💡 撈取「可領取」的公開優惠卷
 $claimableCoupons = [];
 $myCoupons = [];
@@ -300,7 +443,7 @@ if (tableExists($conn, 'coupons') && tableExists($conn, 'coupon_distributions'))
     WHERE is_active = 1 
       AND (start_at IS NULL OR start_at <= NOW()) 
       AND (end_at IS NULL OR end_at >= NOW())
-      AND (usage_limit IS NULL OR usage_limit = 0 OR used_count < usage_limit) /* 💡 修正這裡：加入 IS NULL 判斷 */
+      AND (usage_limit IS NULL OR usage_limit = 0 OR used_count < usage_limit)
       AND (coupon_code IS NULL OR coupon_code = '') 
       AND (target_membership IS NULL OR target_membership = '' OR target_membership = '{$userLevel}')
       AND coupon_id NOT IN (
@@ -418,7 +561,27 @@ include 'header.php';
         </section>
 
         <section id="order-history" style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; max-height:320px; overflow:auto;">
-            <h2 style="font-size:20px; margin-bottom:12px;">購買紀錄</h2>
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+                <h2 style="font-size:20px; margin:0;">購買紀錄</h2>
+                <?php 
+                // 檢查是否有尚未點擊「完成訂單」的項目 (狀態為 DELIVERED)
+                $hasUncompletedOrder = false;
+                if (!empty($orderRows)) {
+                    foreach ($orderRows as $o) {
+                        if ($o['status'] === 'DELIVERED') {
+                            $hasUncompletedOrder = true;
+                            break;
+                        }
+                    }
+                }
+                ?>
+                <?php if ($hasUncompletedOrder): ?>
+                    <span style="color:#b91c1c; font-size:14px; font-weight:700;">
+                        ⚠️ 您有待確認的訂單，點選「完成訂單」即可獲得 1% 紅利點數！
+                    </span>
+                <?php endif; ?>
+            </div>
+
             <?php if (!empty($orderRows)): ?>
                 <div style="overflow:auto;">
                     <table style="width:100%; border-collapse:collapse; font-size:14px;">
@@ -438,10 +601,11 @@ include 'header.php';
                                     <td style="padding:8px 6px;">NT$ <?php echo number_format(floatval($o['total_amount'])); ?></td>
                                     <td style="padding:8px 6px;">
                                         <?php if ($o['status'] === 'DELIVERED'): ?>
-                                            <form method="POST" action="complete_order.php" style="margin:0;">
+                                            <form method="POST" action="profile.php" style="margin:0;">
                                                 <?php if(function_exists('apCsrfField')) echo apCsrfField(); ?>
+                                                <input type="hidden" name="action" value="complete_order">
                                                 <input type="hidden" name="order_id" value="<?php echo intval($o['order_id']); ?>">
-                                                <button type="submit" style="padding:6px 10px; border-radius:999px; background:#111; color:#fff; font-weight:700; font-size:12px; border:none; cursor:pointer;">完成訂單</button>
+                                                <button type="submit" style="padding:6px 10px; border-radius:999px; background:#b91c1c; color:#fff; font-weight:700; font-size:12px; border:none; cursor:pointer;">完成訂單</button>
                                             </form>
                                         <?php else: ?>
                                             <span style="color:#94a3b8; font-size:12px;">-</span>
@@ -486,7 +650,7 @@ include 'header.php';
                                     滿 NT$<?php echo number_format(floatval($coupon['min_order_amount'])); ?><br>
                                     <?php echo !empty($coupon['target_membership']) ? '限'.htmlspecialchars(membershipLevelText($coupon['target_membership'])) : '不限等級'; ?>
                                 </td>
-                                <td style="padding:12px 6px;"><?php echo htmlspecialchars($coupon['end_at'] ?? '無期限'); ?></td>
+                                <td style="padding:12px 6pxStorage;"><?php echo htmlspecialchars($coupon['end_at'] ?? '無期限'); ?></td>
                                 <td style="padding:12px 6px;">
                                     <form method="POST" style="margin:0;">
                                         <input type="hidden" name="action" value="claim_coupon">
@@ -537,6 +701,83 @@ include 'header.php';
             <p style="color:#777;">您目前還沒有領取任何優惠卷。</p>
         <?php endif; ?>
     </section>
+
+    <section style="background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; margin-top:16px;">
+        <h2 style="font-size:20px; margin-bottom:16px; color:#111;">✍️ 商品評論 (寫評價賺點數！)</h2>
+        
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:24px;">
+            
+            <div>
+                <h3 style="font-size:16px; margin-bottom:12px; border-bottom:2px solid #db6b6b; padding-bottom:8px; display:inline-block;">待評論商品</h3>
+                <?php if (!empty($pendingReviews)): ?>
+                    <div style="display:flex; flex-direction:column; gap:16px;">
+                        <?php foreach ($pendingReviews as $item): ?>
+                            <div style="border:1px solid #e5e7eb; border-radius:8px; padding:12px; background:#fafafa;">
+                                <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+                                    <?php if (!empty($item['image_url'])): ?>
+                                        <img src="<?php echo htmlspecialchars('../' . ltrim($item['image_url'], '/')); ?>" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">
+                                    <?php else: ?>
+                                        <div style="width:50px; height:50px; background:#ddd; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:10px;">無圖</div>
+                                    <?php endif; ?>
+                                    <div>
+                                        <div style="font-weight:700; font-size:14px;"><?php echo htmlspecialchars($item['product_name']); ?></div>
+                                        <div style="font-size:12px; color:#666;">訂單: <?php echo htmlspecialchars($item['order_number'] ?: '#'.$item['order_id']); ?></div>
+                                    </div>
+                                </div>
+                                
+                                <form method="POST" style="display:flex; flex-direction:column; gap:8px;">
+                                    <input type="hidden" name="action" value="submit_profile_review">
+                                    <input type="hidden" name="order_id" value="<?php echo intval($item['order_id']); ?>">
+                                    <input type="hidden" name="product_id" value="<?php echo intval($item['product_id']); ?>">
+                                    <?php if(function_exists('apCsrfField')) echo apCsrfField(); ?>
+                                    
+                                    <div class="star-rating">
+                                        <input type="radio" id="star5_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" name="rating" value="5" checked /><label for="star5_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" title="5星">★</label>
+                                        <input type="radio" id="star4_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" name="rating" value="4" /><label for="star4_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" title="4星">★</label>
+                                        <input type="radio" id="star3_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" name="rating" value="3" /><label for="star3_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" title="3星">★</label>
+                                        <input type="radio" id="star2_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" name="rating" value="2" /><label for="star2_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" title="2星">★</label>
+                                        <input type="radio" id="star1_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" name="rating" value="1" /><label for="star1_<?php echo $item['order_id'].'_'.$item['product_id']; ?>" title="1星">★</label>
+                                    </div>
+                                    
+                                    <textarea name="comment" rows="2" placeholder="分享您的使用心得以獲得點數..." style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; resize:vertical;" required></textarea>
+                                    
+                                    <button type="submit" style="padding:8px; border:none; border-radius:6px; background:#db6b6b; color:#fff; font-weight:700; cursor:pointer;">送出評論 (+50點)</button>
+                                </form>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <p style="color:#777; font-size:14px;">目前沒有待評論的商品。快去購物完成訂單吧！</p>
+                <?php endif; ?>
+            </div>
+
+            <div>
+                <h3 style="font-size:16px; margin-bottom:12px; border-bottom:2px solid #111; padding-bottom:8px; display:inline-block;">我的評論紀錄</h3>
+                <?php if (!empty($myReviews)): ?>
+                    <div style="display:flex; flex-direction:column; gap:12px; max-height:500px; overflow-y:auto; padding-right:8px;">
+                        <?php foreach ($myReviews as $review): ?>
+                            <div style="border-bottom:1px solid #eee; padding-bottom:12px;">
+                                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                                    <a href="product_detail.php?id=<?php echo intval($review['product_id']); ?>" style="font-weight:700; color:#111; text-decoration:none; font-size:14px;">
+                                        <?php echo htmlspecialchars($review['product_name']); ?>
+                                    </a>
+                                    <span style="color:#f59e0b; font-size:14px;"><?php echo str_repeat('★', $review['rating']) . str_repeat('☆', 5 - $review['rating']); ?></span>
+                                </div>
+                                <p style="font-size:13px; color:#444; margin:0 0 6px 0; line-height:1.5;">
+                                    <?php echo nl2br(htmlspecialchars($review['comment'])); ?>
+                                </p>
+                                <div style="font-size:11px; color:#999;"><?php echo htmlspecialchars(substr($review['created_at'], 0, 10)); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <p style="color:#777; font-size:14px;">尚無評論紀錄。</p>
+                <?php endif; ?>
+            </div>
+            
+        </div>
+    </section>
+
 </section>
 
 <div id="redeemCouponModal" style="position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(15,23,42,.6); z-index:999; backdrop-filter:blur(2px);">
@@ -568,6 +809,29 @@ include 'header.php';
     section[style*='grid-template-columns:repeat(2'] {
         grid-template-columns: 1fr !important;
     }
+}
+/* 💡 新增：商品評價星星特效 CSS */
+.star-rating {
+    display: inline-flex;
+    flex-direction: row-reverse;
+    justify-content: flex-end;
+}
+.star-rating input {
+    display: none;
+}
+.star-rating label {
+    font-size: 24px;
+    color: #d1d5db;
+    cursor: pointer;
+    padding: 0 2px;
+    transition: color 0.2s;
+}
+.star-rating input:checked ~ label {
+    color: #f59e0b;
+}
+.star-rating label:hover,
+.star-rating label:hover ~ label {
+    color: #fcd34d;
 }
 </style>
 
