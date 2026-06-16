@@ -1,9 +1,9 @@
 <?php
 // db_setup_and_sync.php - 團隊資料庫【全新建立 + 舊版同步】一鍵搞定腳本
-// 版本 4.1 (修復防護版)
+// 版本 4.2 (補上 coupon_banners 表格)
 header("Content-Type: text/html; charset=utf-8");
 
-// 💡 新增這行：防止 PHP 8.1+ 因為一點點微小的 SQL 阻礙就整個腳本崩潰！
+// 防止 PHP 8.1+ 因為一點點微小的 SQL 阻礙就整個腳本崩潰！
 mysqli_report(MYSQLI_REPORT_OFF);
 
 $host = "localhost";
@@ -21,7 +21,7 @@ $conn->query("CREATE DATABASE IF NOT EXISTS `$dbname` DEFAULT CHARACTER SET utf8
 $conn->select_db($dbname);
 
 echo "<h2>🚀 All Pass 專案 - 資料庫結構同步/初始化開始...</h2>";
-echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4.1</p>";
+echo "<p style='color:#0ea5e9; font-weight:700;'>執行版本：v4.2</p>";
 echo "<hr>";
 
 function columnExists($conn, $table, $column) {
@@ -104,9 +104,6 @@ if (tableExists($conn, 'supplier_supplies')) {
     }
     if (!columnExists($conn, 'supplier_supplies', 'request_id')) {
         $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `request_id` INT NULL AFTER `admin_id`");
-    }
-    if (!indexExists($conn, 'supplier_supplies', 'idx_supplier_supplies_request_id')) {
-        $conn->query("ALTER TABLE `supplier_supplies` ADD INDEX `idx_supplier_supplies_request_id` (`request_id`)");
     }
     if (!columnExists($conn, 'supplier_supplies', 'product_id')) {
         $conn->query("ALTER TABLE `supplier_supplies` ADD COLUMN `product_id` INT NOT NULL AFTER `request_id`");
@@ -193,6 +190,7 @@ $sql_vars = "CREATE TABLE IF NOT EXISTS `product_variants` (
     `product_id` INT NOT NULL,
     `sku_code` VARCHAR(50) NOT NULL UNIQUE,
     `color` VARCHAR(50) NULL,
+    `color_hex` VARCHAR(20) NULL,
     `size_inches` VARCHAR(50) NULL,
     `capacity_liters` VARCHAR(50) NULL,
     `original_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -251,7 +249,6 @@ $sql_users = "CREATE TABLE IF NOT EXISTS `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_users);
 
-// 💡 已經將「會員收藏」拉到這層，確保它一定會被建立
 // 📁 表格 8：會員收藏 (user_favorites)
 $sql_favorites = "CREATE TABLE IF NOT EXISTS `user_favorites` (
     `favorite_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -289,7 +286,6 @@ $sql_cart_items = "CREATE TABLE IF NOT EXISTS `cart_items` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_cart_items);
 
-// 修正 cart_items 欄位
 if (columnExists($conn, 'cart_items', 'cart_id')) {
     $conn->query("ALTER TABLE `cart_items` MODIFY COLUMN `cart_id` INT NULL");
 }
@@ -439,6 +435,7 @@ $sql_product_qa = "CREATE TABLE IF NOT EXISTS `product_qa` (
     `question` TEXT NOT NULL,
     `answer` TEXT NOT NULL,
     `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX `idx_product_qa_product_id` (`product_id`),
@@ -457,6 +454,9 @@ if (!columnExists($conn, 'product_qa', 'answer')) {
 }
 if (!columnExists($conn, 'product_qa', 'qa_type')) {
     $conn->query("ALTER TABLE `product_qa` ADD COLUMN `qa_type` ENUM('GENERAL','PRODUCT') NOT NULL DEFAULT 'PRODUCT' AFTER `answer`");
+}
+if (!columnExists($conn, 'product_qa', 'is_active')) {
+    $conn->query("ALTER TABLE `product_qa` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `qa_type`");
 }
 
 $sql_user_notifications = "CREATE TABLE IF NOT EXISTS `user_notifications` (
@@ -539,8 +539,11 @@ if (tableExists($conn, 'coupons')) {
     if (!columnExists($conn, 'coupons', 'is_active')) {
         $conn->query("ALTER TABLE `coupons` ADD COLUMN `is_active` TINYINT(1) NOT NULL DEFAULT 1 AFTER `end_at`");
     }
+    if (!columnExists($conn, 'coupons', 'is_show_on_homepage')) {
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `is_show_on_homepage` TINYINT(1) NOT NULL DEFAULT 0 AFTER `is_active`");
+    }
     if (!columnExists($conn, 'coupons', 'created_at')) {
-        $conn->query("ALTER TABLE `coupons` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `is_active`");
+        $conn->query("ALTER TABLE `coupons` ADD COLUMN `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `is_show_on_homepage`");
     }
     if (!indexExists($conn, 'coupons', 'idx_coupons_code')) {
         $conn->query("ALTER TABLE `coupons` ADD INDEX `idx_coupons_code` (`coupon_code`)");
@@ -603,6 +606,16 @@ $sql_coupon_code_uses = "CREATE TABLE IF NOT EXISTS `coupon_code_uses` (
     INDEX `idx_coupon_code_uses_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_coupon_code_uses);
+
+// 💡 建立優惠卷跑馬燈 Table
+$sql_coupon_banners = "CREATE TABLE IF NOT EXISTS `coupon_banners` (
+    `coupon_id` INT NOT NULL,
+    `banner_image_url` VARCHAR(255) NOT NULL,
+    `is_show_on_homepage` TINYINT(1) NOT NULL DEFAULT 1,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (`coupon_id`, `banner_image_url`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
+$conn->query($sql_coupon_banners);
 
 if (tableExists($conn, 'coupon_code_uses')) {
     if (!columnExists($conn, 'coupon_code_uses', 'coupon_id')) {
@@ -755,10 +768,28 @@ $sql_product_reviews = "CREATE TABLE IF NOT EXISTS `product_reviews` (
     `is_visible` TINYINT(1) NOT NULL DEFAULT 1,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY `uq_product_review_order_user` (`product_id`, `user_id`, `order_id`),
+    UNIQUE KEY `uq_product_review_product_user` (`product_id`, `user_id`),
     INDEX `idx_product_reviews_product` (`product_id`),
     INDEX `idx_product_reviews_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
 $conn->query($sql_product_reviews);
+
+if (tableExists($conn, 'product_reviews')) {
+    if (!indexExists($conn, 'product_reviews', 'uq_product_review_product_user')) {
+        $conn->query(
+            "DELETE old_reviews
+             FROM product_reviews old_reviews
+             JOIN product_reviews newer_reviews
+               ON newer_reviews.product_id = old_reviews.product_id
+              AND newer_reviews.user_id = old_reviews.user_id
+              AND (
+                  newer_reviews.created_at > old_reviews.created_at
+                  OR (newer_reviews.created_at = old_reviews.created_at AND newer_reviews.review_id > old_reviews.review_id)
+              )"
+        );
+        $conn->query("ALTER TABLE `product_reviews` ADD UNIQUE KEY `uq_product_review_product_user` (`product_id`, `user_id`)");
+    }
+}
 
 $sql_admin_audit_logs = "CREATE TABLE IF NOT EXISTS `admin_audit_logs` (
     `log_id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -795,6 +826,9 @@ if (!columnExists($conn, 'product_variants', 'special_price')) {
 }
 if (!columnExists($conn, 'product_variants', 'member_price')) {
     $conn->query("ALTER TABLE `product_variants` ADD COLUMN `member_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER `special_price`");
+}
+if (!columnExists($conn, 'product_variants', 'color_hex')) {
+    $conn->query("ALTER TABLE `product_variants` ADD COLUMN `color_hex` VARCHAR(20) NULL AFTER `color`");
 }
 if (columnExists($conn, 'product_variants', 'price')) {
     $conn->query("UPDATE `product_variants` SET `original_price` = `price`, `member_price` = `price` WHERE `original_price` = 0.00 AND `member_price` = 0.00");
