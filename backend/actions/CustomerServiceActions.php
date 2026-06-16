@@ -1,7 +1,7 @@
 <?php
 // CustomerServiceActions.php - 客服管理動作
 
-if (!in_array($action, ['reply_ticket_message', 'add_product_qa'], true)) {
+if (!in_array($action, ['reply_ticket_message', 'add_product_qa', 'update_product_qa', 'toggle_product_qa'], true)) {
     return;
 }
 
@@ -57,7 +57,8 @@ if ($action === 'reply_ticket_message') {
     }
 }
 
-if ($action === 'add_product_qa') {
+if ($action === 'add_product_qa' || $action === 'update_product_qa') {
+    $qaId = isset($_POST['qa_id']) ? intval($_POST['qa_id']) : 0;
     $question = trim($_POST['question'] ?? '');
     $answer = trim($_POST['answer'] ?? '');
     $qaType = trim($_POST['qa_type'] ?? 'PRODUCT');
@@ -76,11 +77,35 @@ if ($action === 'add_product_qa') {
         $productId = null;
     }
 
+    if ($qaType === 'PRODUCT' && $productId === null) {
+        csRedirect($returnTo, '商品專屬 FAQ 請選擇商品，或改為通用 FAQ。');
+    }
+
+    if ($action === 'update_product_qa') {
+        if ($qaId <= 0) {
+            csRedirect($returnTo, '找不到要更新的 FAQ。');
+        }
+
+        if ($productId === null) {
+            $stmt = $conn->prepare("UPDATE product_qa SET product_id = NULL, question = ?, answer = ?, qa_type = ?, updated_at = NOW() WHERE qa_id = ?");
+            $stmt->bind_param('sssi', $question, $answer, $qaType, $qaId);
+        } else {
+            $stmt = $conn->prepare("UPDATE product_qa SET product_id = ?, question = ?, answer = ?, qa_type = ?, updated_at = NOW() WHERE qa_id = ?");
+            $stmt->bind_param('isssi', $productId, $question, $answer, $qaType, $qaId);
+        }
+
+        if ($stmt && $stmt->execute()) {
+            csRedirect($returnTo, 'FAQ 已更新。');
+        }
+
+        csRedirect($returnTo, '更新 FAQ 失敗。');
+    }
+
     if ($productId === null) {
-        $stmt = $conn->prepare("INSERT INTO product_qa (product_id, question, answer, qa_type) VALUES (NULL, ?, ?, ?)");
+        $stmt = $conn->prepare("INSERT INTO product_qa (product_id, question, answer, qa_type, is_active) VALUES (NULL, ?, ?, ?, 1)");
         $stmt->bind_param('sss', $question, $answer, $qaType);
     } else {
-        $stmt = $conn->prepare("INSERT INTO product_qa (product_id, question, answer, qa_type) VALUES (?, ?, ?, ?)");
+        $stmt = $conn->prepare("INSERT INTO product_qa (product_id, question, answer, qa_type, is_active) VALUES (?, ?, ?, ?, 1)");
         $stmt->bind_param('isss', $productId, $question, $answer, $qaType);
     }
 
@@ -89,5 +114,24 @@ if ($action === 'add_product_qa') {
     }
 
     csRedirect($returnTo, '新增 FAQ 失敗。');
+}
+if ($action === 'toggle_product_qa') {
+    $qaId = isset($_POST['qa_id']) ? intval($_POST['qa_id']) : 0;
+    $newStatus = isset($_POST['new_status']) ? intval($_POST['new_status']) : 0;
+    $newStatus = $newStatus === 1 ? 1 : 0;
+
+    if ($qaId <= 0) {
+        csRedirect($returnTo, '找不到要更新的 FAQ。');
+    }
+
+    $stmt = $conn->prepare("UPDATE product_qa SET is_active = ?, updated_at = NOW() WHERE qa_id = ?");
+    if ($stmt) {
+        $stmt->bind_param('ii', $newStatus, $qaId);
+        if ($stmt->execute()) {
+            csRedirect($returnTo, $newStatus === 1 ? 'FAQ 已啟用。' : 'FAQ 已停用。');
+        }
+    }
+
+    csRedirect($returnTo, '更新 FAQ 狀態失敗。');
 }
 ?>

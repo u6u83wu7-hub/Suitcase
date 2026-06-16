@@ -122,6 +122,83 @@ function ouNotifyShipping($conn, $orderId) {
     }
 }
 
+// 💡 新增 1：當訂單狀態改為「已送達」時，發送聊天室訊息與通知
+function ouNotifyDelivered($conn, $orderId) {
+    $stmt = $conn->prepare("SELECT o.order_id, o.order_number, o.user_id
+                            FROM orders o
+                            WHERE o.order_id = ? LIMIT 1");
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$row) return;
+
+    $userId = (int)$row['user_id'];
+    $orderNo = !empty($row['order_number']) ? $row['order_number'] : ('#' . $row['order_id']);
+
+    // 寫入一般系統通知
+    $title = '📦 您的包裹已送達指定地點！';
+    $message = '訂單 ' . $orderNo . ' 已經送達囉！確認商品無誤後，請至「會員中心」點選【完成訂單】，即可賺取 1% 紅利點數回饋！';
+    
+    if (ouTableExists($conn, 'user_notifications')) {
+        $nStmt = $conn->prepare("INSERT INTO user_notifications (user_id, title, message) VALUES (?, ?, ?)");
+        $nStmt->bind_param("iss", $userId, $title, $message);
+        $nStmt->execute();
+        $nStmt->close();
+    }
+
+    // 寫入客服聊天室 (模擬客服小幫手自動密他)
+    if (ouTableExists($conn, 'customer_tickets') && ouTableExists($conn, 'ticket_messages')) {
+        // 先看有沒有聊天室，沒有就建一個
+        $tStmt = $conn->prepare("SELECT ticket_id FROM customer_tickets WHERE user_id = ? LIMIT 1");
+        $tStmt->bind_param("i", $userId);
+        $tStmt->execute();
+        $tRes = $tStmt->get_result()->fetch_assoc();
+        $tStmt->close();
+
+        $ticketId = 0;
+        if ($tRes) {
+            $ticketId = (int)$tRes['ticket_id'];
+        } else {
+            $iStmt = $conn->prepare("INSERT INTO customer_tickets (user_id, status) VALUES (?, 'OPEN')");
+            $iStmt->bind_param("i", $userId);
+            if ($iStmt->execute()) $ticketId = $iStmt->insert_id;
+            $iStmt->close();
+        }
+
+        if ($ticketId > 0) {
+            $chatMsg = "【系統通知】\n您訂購的包裹 (" . $orderNo . ") 已經送達囉！🚀\n\n檢查商品沒問題後，記得去會員中心的「購買紀錄」點擊「完成訂單」，就能馬上拿到紅利點數！有任何問題也可以直接在這裡回覆我喔😊";
+            $adminId = 0; // 0 代表系統/機器人
+            $mStmt = $conn->prepare("INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, message_text) VALUES (?, 'ADMIN', ?, ?)");
+            $mStmt->bind_param("iis", $ticketId, $adminId, $chatMsg);
+            $mStmt->execute();
+            $mStmt->close();
+            
+            // 更新狀態讓前台跳紅點
+            $conn->query("UPDATE customer_tickets SET updated_at = NOW() WHERE ticket_id = {$ticketId}");
+        }
+    }
+}
+
+// 💡 新增 2：當訂單改為「已完成」時，自動發放紅利點數
+function ouGiveRewardPoints($conn, $orderId) {
+    $stmt = $conn->prepare("SELECT user_id, total_amount FROM orders WHERE order_id = ? LIMIT 1");
+    $stmt->bind_param("i", $orderId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    
+    if ($row) {
+        $userId = (int)$row['user_id'];
+        $points = max(1, floor((float)$row['total_amount'] * 0.01)); // 1%回饋
+        
+        $upd = $conn->prepare("UPDATE users SET points_balance = points_balance + ? WHERE user_id = ?");
+        $upd->bind_param("ii", $points, $userId);
+        $upd->execute();
+        $upd->close();
+    }
+}
+
 $conn->begin_transaction();
 
 try {
@@ -218,8 +295,15 @@ try {
             }
         }
 
+        // 💡 觸發相應的通知與點數發放邏輯
         if ($newStatus === 'SHIPPED' && $currentStatus !== 'SHIPPED') {
             ouNotifyShipping($conn, $orderId);
+        }
+        if ($newStatus === 'DELIVERED' && $currentStatus !== 'DELIVERED') {
+            ouNotifyDelivered($conn, $orderId); // 觸發客服訊息
+        }
+        if ($newStatus === 'COMPLETED' && $currentStatus !== 'COMPLETED') {
+            ouGiveRewardPoints($conn, $orderId); // 發放點數
         }
     }
 

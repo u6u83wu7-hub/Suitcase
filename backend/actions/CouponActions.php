@@ -1,6 +1,53 @@
 <?php
-if (!in_array($action ?? '', ['add_coupon', 'edit_coupon', 'delete_coupon', 'send_coupon'], true)) {
+// 💡 修正這裡：把 upload_coupon_banner 和 delete_coupon_banner 加入合法白名單
+    date_default_timezone_set('Asia/Taipei');
+
+if (!in_array($action ?? '', ['add_coupon', 'edit_coupon', 'delete_coupon', 'send_coupon', 'upload_coupon_banner', 'delete_coupon_banner'], true)) {
     goCoupon('無效的優惠卷操作。');
+}
+
+// === 新增：處理優惠券跑馬燈 Banner 的上傳與刪除 ===
+if ($action === 'upload_coupon_banner') {
+    $couponId = intval($_POST['coupon_id'] ?? 0);
+    $isShow = intval($_POST['is_show_on_homepage'] ?? 1);
+    $sortOrder = intval($_POST['sort_order'] ?? 0);
+
+    if ($couponId > 0 && isset($_FILES['banner_image']) && $_FILES['banner_image']['error'] === UPLOAD_ERR_OK) {
+        // 💡 注意：因為這個檔案在 actions/ 資料夾內，所以上傳路徑要退回兩層去 img/
+        $uploadDir = __DIR__ . '/../../img/promotions/';
+        @mkdir($uploadDir, 0777, true);
+        $ext = strtolower(pathinfo($_FILES['banner_image']['name'], PATHINFO_EXTENSION));
+        $filename = 'coupon_banner_' . time() . '_' . mt_rand(1000, 9999) . '.' . $ext;
+        $targetPath = $uploadDir . $filename;
+
+        if (move_uploaded_file($_FILES['banner_image']['tmp_name'], $targetPath)) {
+            $imageUrl = 'img/promotions/' . $filename;
+            $stmt = $conn->prepare("INSERT INTO coupon_banners (coupon_id, banner_image_url, is_show_on_homepage, sort_order) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param('isii', $couponId, $imageUrl, $isShow, $sortOrder);
+            $stmt->execute();
+            $stmt->close();
+            
+            header('Location: backend.php?page=coupon&success=1');
+            exit;
+        }
+    }
+    header('Location: backend.php?page=coupon&error=' . urlencode('跑馬燈 Banner 上傳失敗'));
+    exit;
+}
+
+if ($action === 'delete_coupon_banner') {
+    $couponId = intval($_POST['coupon_id'] ?? 0);
+    $bannerUrl = $_POST['banner_image_url'] ?? '';
+    if ($couponId > 0 && $bannerUrl !== '') {
+        $stmt = $conn->prepare("DELETE FROM coupon_banners WHERE coupon_id = ? AND banner_image_url = ?");
+        $stmt->bind_param('is', $couponId, $bannerUrl);
+        $stmt->execute();
+        $stmt->close();
+        header('Location: backend.php?page=coupon&success=1');
+        exit;
+    }
+    header('Location: backend.php?page=coupon&error=' . urlencode('刪除失敗'));
+    exit;
 }
 
 function couponSuccess()
@@ -125,6 +172,12 @@ if (($action ?? '') === 'delete_coupon') {
         $stmt->close();
 
         $stmt = $conn->prepare('DELETE FROM coupon_distributions WHERE coupon_id = ?');
+        $stmt->bind_param('i', $couponId);
+        $stmt->execute();
+        $stmt->close();
+        
+        // 💡 順便刪除跑馬燈設定
+        $stmt = $conn->prepare('DELETE FROM coupon_banners WHERE coupon_id = ?');
         $stmt->bind_param('i', $couponId);
         $stmt->execute();
         $stmt->close();

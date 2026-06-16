@@ -95,7 +95,11 @@ try {
     $inventoryLogEnabled = upTableExists($conn, 'inventory_adjustment_logs');
     $adminId = isset($_SESSION['admin_id']) ? (int)$_SESSION['admin_id'] : 0;
     $existingVariants = [];
-    $existingVariantRes = $conn->query("SELECT variant_id, sku_code, size_inches, color, stock_available FROM product_variants WHERE product_id = {$productId} FOR UPDATE");
+    $existingVariantSelect = 'variant_id, sku_code, size_inches, color, stock_available';
+    if (in_array('color_hex', $variantColumns, true)) {
+        $existingVariantSelect .= ', color_hex';
+    }
+    $existingVariantRes = $conn->query("SELECT {$existingVariantSelect} FROM product_variants WHERE product_id = {$productId} FOR UPDATE");
     if ($existingVariantRes) {
         while ($existingVariant = $existingVariantRes->fetch_assoc()) {
             $existingVariants[(int)$existingVariant['variant_id']] = $existingVariant;
@@ -141,6 +145,7 @@ try {
     $variantIds = isset($_POST['variant_id']) && is_array($_POST['variant_id']) ? $_POST['variant_id'] : [];
     $sizes = isset($_POST['size_inches']) && is_array($_POST['size_inches']) ? $_POST['size_inches'] : [];
     $colors = isset($_POST['color']) && is_array($_POST['color']) ? $_POST['color'] : [];
+    $colorHexes = isset($_POST['color_hex']) && is_array($_POST['color_hex']) ? $_POST['color_hex'] : [];
     $originalPrices = isset($_POST['original_price']) && is_array($_POST['original_price']) ? $_POST['original_price'] : [];
     $specialPrices = isset($_POST['special_price']) && is_array($_POST['special_price']) ? $_POST['special_price'] : [];
     $memberPrices = isset($_POST['member_price']) && is_array($_POST['member_price']) ? $_POST['member_price'] : [];
@@ -161,6 +166,14 @@ try {
         $stock = intval($stocks[$i]);
         $size = isset($sizes[$i]) ? trim($sizes[$i]) : '';
         $color = isset($colors[$i]) ? trim($colors[$i]) : '';
+        $colorHex = isset($colorHexes[$i]) ? strtoupper(trim($colorHexes[$i])) : '';
+        $colorHex = preg_match('/^#[0-9A-F]{6}$/', $colorHex) ? $colorHex : null;
+        if ($color === '') {
+            $colorHex = null;
+        }
+        if ($specialPrice !== null && ($specialPrice <= 0 || $specialPrice >= $originalPrice)) {
+            throw new Exception('SKU 特價需大於 0 且低於原價；若無特價請留空。');
+        }
 
         if ($variantId > 0) {
             $oldVariant = $existingVariants[$variantId] ?? null;
@@ -178,6 +191,11 @@ try {
                 $vSet[] = 'color = ?';
                 $vTypes .= 's';
                 $vVals[] = $color;
+            }
+            if (in_array('color_hex', $variantColumns, true)) {
+                $vSet[] = 'color_hex = ?';
+                $vTypes .= 's';
+                $vVals[] = $colorHex;
             }
 
             $vTypes .= 'ii';
@@ -212,6 +230,11 @@ try {
                 $vCols[] = 'color';
                 $vTypes .= 's';
                 $vVals[] = $color;
+            }
+            if (in_array('color_hex', $variantColumns, true)) {
+                $vCols[] = 'color_hex';
+                $vTypes .= 's';
+                $vVals[] = $colorHex;
             }
 
             $vColSql = implode(', ', $vCols);
