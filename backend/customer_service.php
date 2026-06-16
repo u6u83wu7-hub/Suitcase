@@ -7,6 +7,19 @@ function h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function csTableExists($conn, $tableName) {
+    $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $res = $conn->query("SHOW TABLES LIKE '{$safe}'");
+    return $res && $res->num_rows > 0;
+}
+
+function csColumnExists($conn, $tableName, $columnName) {
+    $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $tableName);
+    $safeColumn = $conn->real_escape_string($columnName);
+    $res = $conn->query("SHOW COLUMNS FROM `{$safeTable}` LIKE '{$safeColumn}'");
+    return $res && $res->num_rows > 0;
+}
+
 $allProducts = [];
 $prodRes = $conn->query("SELECT product_id, name FROM products ORDER BY name ASC");
 if ($prodRes) {
@@ -86,6 +99,21 @@ for ($i = 0; $i < $messageCount; $i++) {
     }
     $nextAdminReply[(int)$messages[$i]['message_id']] = $replyText;
 }
+
+$productFaqs = [];
+if (csTableExists($conn, 'product_qa')) {
+    $faqActiveSql = csColumnExists($conn, 'product_qa', 'is_active') ? 'pq.is_active' : '1 AS is_active';
+    $faqRes = $conn->query("
+        SELECT pq.qa_id, pq.product_id, pq.question, pq.answer, pq.qa_type, {$faqActiveSql}, pq.created_at, pq.updated_at, p.name AS product_name
+        FROM product_qa pq
+        LEFT JOIN products p ON p.product_id = pq.product_id
+        ORDER BY pq.updated_at DESC, pq.qa_id DESC
+        LIMIT 80
+    ");
+    if ($faqRes) {
+        while ($row = $faqRes->fetch_assoc()) { $productFaqs[] = $row; }
+    }
+}
 ?>
 
 <style>
@@ -164,6 +192,50 @@ for ($i = 0; $i < $messageCount; $i++) {
     .cs-form-input, .cs-form-select { width: 100%; border: 1px solid var(--cs-border); border-radius: 10px; padding: 12px; font-size: 15px; font-family: inherit; background: #fff; box-sizing: border-box; }
     .cs-form-input:focus, .cs-form-select:focus { outline: none; border-color: var(--cs-brand); box-shadow: 0 0 0 3px rgba(219,107,107,0.1); }
     .cs-modal-actions { margin-top: 32px; display: flex; justify-content: flex-end; gap: 12px; }
+    .cs-faq-admin { margin-top: 20px; background: #fff; border: 1px solid var(--cs-border); border-radius: 16px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); }
+    .cs-faq-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .cs-faq-head h2 { margin: 0 0 6px; color: var(--cs-dark); font-size: 20px; }
+    .cs-faq-table-wrap { overflow-x: auto; border: 1px solid var(--cs-border); border-radius: 12px; }
+    .cs-faq-table { width: 100%; min-width: 880px; border-collapse: collapse; font-size: 13px; }
+    .cs-faq-table th, .cs-faq-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; text-align: left; vertical-align: top; }
+    .cs-faq-table th { background: #f8fafc; color: #64748b; white-space: nowrap; }
+    .cs-faq-question { max-width: 260px; font-weight: 800; color: var(--cs-dark); line-height: 1.5; }
+    .cs-faq-answer { max-width: 340px; color: #475569; line-height: 1.6; }
+    .cs-faq-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .cs-faq-actions form { margin: 0; }
+    .cs-faq-empty { padding: 24px; text-align: center; color: var(--cs-text-muted); background: #f8fafc; border-radius: 12px; }
+    @media (max-width: 820px) {
+        .cs-container {
+            grid-template-columns: 1fr;
+            height: auto;
+            min-height: 0;
+        }
+        .cs-sidebar { max-height: 320px; }
+        .cs-main { min-height: 560px; }
+        .cs-main-header,
+        .cs-input-area {
+            align-items: stretch;
+            flex-direction: column;
+        }
+        .btn-submit-reply { width: 100%; }
+        .msg-content-wrapper { max-width: 100%; min-width: 0; }
+        .msg-row,
+        .msg-row.admin {
+            align-items: stretch;
+            flex-direction: column;
+        }
+        .msg-row.admin .msg-content-wrapper,
+        .msg-row.admin .msg-aside {
+            align-items: flex-start;
+        }
+        .cs-modal {
+            width: min(92vw, 600px);
+            max-height: 88vh;
+            overflow: auto;
+            padding: 22px;
+        }
+        .cs-faq-admin { padding: 16px; }
+    }
 </style>
 
 <div>
@@ -242,7 +314,7 @@ for ($i = 0; $i < $messageCount; $i++) {
                                 <!-- 💡 乾淨的商品標籤排版，完全比照前台 -->
                                 <?php if ($isUser && $msgProductId > 0): ?>
                                     <!-- ⚠️ 如果你的前台商品頁不是 product_detail.php，請改掉這裡的 href -->
-                                    <a href="../product_detail.php?id=<?php echo $msgProductId; ?>" target="_blank" class="msg-product-link" title="開新分頁查看商品">
+                                    <a href="../homepage/product_detail.php?id=<?php echo $msgProductId; ?>" target="_blank" class="msg-product-link" title="開新分頁查看商品">
                                         📍 相關商品：<?php echo h($msgProductLabel); ?> ↗
                                     </a>
                                 <?php endif; ?>
@@ -282,12 +354,81 @@ for ($i = 0; $i < $messageCount; $i++) {
     </section>
 </div>
 
+<section class="cs-faq-admin">
+    <div class="cs-faq-head">
+        <div>
+            <h2>FAQ 管理</h2>
+            <p class="muted" style="margin:0;">可編輯客服收錄的商品 FAQ，打錯可停用或重新啟用。</p>
+        </div>
+        <button type="button" class="pm-btn pm-btn-main js-faq-create">新增 FAQ</button>
+    </div>
+    <?php if (empty($productFaqs)): ?>
+        <div class="cs-faq-empty">目前尚未建立 FAQ。</div>
+    <?php else: ?>
+        <div class="cs-faq-table-wrap">
+            <table class="cs-faq-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>類型 / 商品</th>
+                        <th>問題</th>
+                        <th>答案</th>
+                        <th>狀態</th>
+                        <th>更新時間</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($productFaqs as $faq): ?>
+                        <?php
+                        $faqProductId = (int)($faq['product_id'] ?? 0);
+                        $faqType = (string)($faq['qa_type'] ?? 'PRODUCT');
+                        $faqActive = (int)($faq['is_active'] ?? 1) === 1;
+                        ?>
+                        <tr>
+                            <td>#<?php echo (int)$faq['qa_id']; ?></td>
+                            <td>
+                                <span class="cs-badge <?php echo $faqType === 'GENERAL' ? 'answered' : 'open'; ?>"><?php echo $faqType === 'GENERAL' ? '通用' : '商品'; ?></span>
+                                <div style="margin-top:6px; color:#64748b;"><?php echo $faqProductId > 0 ? h($faq['product_name'] ?: ('#' . $faqProductId)) : '不綁定商品'; ?></div>
+                            </td>
+                            <td class="cs-faq-question"><?php echo nl2br(h($faq['question'])); ?></td>
+                            <td class="cs-faq-answer"><?php echo nl2br(h($faq['answer'])); ?></td>
+                            <td><span class="cs-badge <?php echo $faqActive ? 'answered' : 'open'; ?>"><?php echo $faqActive ? '啟用' : '停用'; ?></span></td>
+                            <td><?php echo h(substr((string)($faq['updated_at'] ?? $faq['created_at'] ?? ''), 0, 16)); ?></td>
+                            <td>
+                                <div class="cs-faq-actions">
+                                    <button type="button"
+                                            class="btn-action js-faq-edit"
+                                            data-qa-id="<?php echo (int)$faq['qa_id']; ?>"
+                                            data-question="<?php echo h($faq['question']); ?>"
+                                            data-answer="<?php echo h($faq['answer']); ?>"
+                                            data-type="<?php echo h($faqType); ?>"
+                                            data-product-id="<?php echo $faqProductId > 0 ? $faqProductId : ''; ?>">編輯</button>
+                                    <form method="POST" action="backend_action.php">
+                                        <?php echo apCsrfField(); ?>
+                                        <input type="hidden" name="action" value="toggle_product_qa">
+                                        <input type="hidden" name="qa_id" value="<?php echo (int)$faq['qa_id']; ?>">
+                                        <input type="hidden" name="new_status" value="<?php echo $faqActive ? '0' : '1'; ?>">
+                                        <input type="hidden" name="return_to" value="<?php echo h('backend.php?page=customer_service&ticket_id=' . intval($selectedTicketId)); ?>">
+                                        <button type="submit" class="btn-action"><?php echo $faqActive ? '停用' : '啟用'; ?></button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</section>
+
 <div class="cs-modal-mask" id="csFaqModal">
     <div class="cs-modal">
         <h3>新增常見問題</h3>
         <form method="POST" action="backend_action.php">
             <?php echo apCsrfField(); ?>
-            <input type="hidden" name="action" value="add_product_qa">
+            <input type="hidden" name="action" value="add_product_qa" id="csFaqAction">
+            <input type="hidden" name="qa_id" value="" id="csFaqId">
             <input type="hidden" name="return_to" value="<?php echo h('backend.php?page=customer_service&ticket_id=' . intval($selectedTicketId)); ?>">
 
             <div class="cs-form-group">
@@ -328,6 +469,8 @@ for ($i = 0; $i < $messageCount; $i++) {
     const faqAnswer = document.getElementById('csFaqAnswer');
     const faqType = document.getElementById('csFaqType');
     const faqProduct = document.getElementById('csFaqProduct');
+    const faqAction = document.getElementById('csFaqAction');
+    const faqId = document.getElementById('csFaqId');
     const faqCancel = document.getElementById('csFaqCancel');
     const replyInput = document.getElementById('replyInput');
     const replyProductId = document.getElementById('replyProductId');
@@ -347,17 +490,41 @@ for ($i = 0; $i < $messageCount; $i++) {
         }
     }
 
-    function openFaqModal({ question = '', answer = '', productId = '' }) {
+    function openFaqModal({ qaId = '', question = '', answer = '', productId = '', qaType = '' }) {
         if (!faqModal) {
             return;
+        }
+        if (faqAction) {
+            faqAction.value = qaId ? 'update_product_qa' : 'add_product_qa';
+        }
+        if (faqId) {
+            faqId.value = qaId || '';
         }
         faqQuestion.value = question;
         faqAnswer.value = answer;
         faqProduct.value = productId || '';
-        faqType.value = productId ? 'PRODUCT' : 'GENERAL';
+        faqType.value = qaType || (productId ? 'PRODUCT' : 'GENERAL');
         faqProduct.disabled = faqType.value === 'GENERAL';
         faqModal.style.display = 'flex';
     }
+
+    document.querySelectorAll('.js-faq-create').forEach(btn => {
+        btn.addEventListener('click', () => {
+            openFaqModal({});
+        });
+    });
+
+    document.querySelectorAll('.js-faq-edit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            openFaqModal({
+                qaId: btn.dataset.qaId || '',
+                question: btn.dataset.question || '',
+                answer: btn.dataset.answer || '',
+                productId: btn.dataset.productId || '',
+                qaType: btn.dataset.type || ''
+            });
+        });
+    });
 
     document.querySelectorAll('.js-faq-btn').forEach(btn => {
         btn.addEventListener('click', () => {
