@@ -5,9 +5,27 @@ require_once __DIR__ . '/auth_guard.php';
 
 $selectedOrderId = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
 $allowedStatuses = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED'];
+$allowedReturnFilters = ['ANY', 'PENDING', 'APPROVED', 'REJECTED', 'REFUNDED'];
 
 function h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function orderSizeLabel($size) {
+    $size = preg_replace('/\s+/', '', trim((string)$size));
+    if ($size === '') {
+        return '';
+    }
+    if (preg_match('/^\d+$/', $size)) {
+        return $size . '吋';
+    }
+    if (preg_match('/^\d+(?:\+\d+)+$/', $size)) {
+        return $size . '吋組合';
+    }
+    if (preg_match('/吋/u', $size)) {
+        return preg_replace('/吋+$/u', '吋', $size);
+    }
+    return $size;
 }
 
 function orderStatusLabel($status) {
@@ -22,6 +40,24 @@ function orderStatusLabel($status) {
     return $labels[$status] ?? $status;
 }
 
+function returnStatusMeta($status) {
+    $status = strtoupper((string)$status);
+    $map = [
+        'PENDING' => ['label' => '待審核', 'class' => 'return-pending', 'hint' => '請確認訂單、商品與退貨原因後，選擇核准或拒絕。'],
+        'APPROVED' => ['label' => '已核准', 'class' => 'return-approved', 'hint' => '已核准退貨，等待商品確認或後續退款處理。'],
+        'REJECTED' => ['label' => '已拒絕', 'class' => 'return-rejected', 'hint' => '退貨已拒絕，請在審核備註說明原因。'],
+        'REFUNDED' => ['label' => '已退款', 'class' => 'return-refunded', 'hint' => '已建立退款紀錄；重複送出不應再次建立退款交易。'],
+    ];
+    return $map[$status] ?? ['label' => $status, 'class' => 'return-pending', 'hint' => '請確認此退貨狀態是否需要後續處理。'];
+}
+
+function returnFilterLabel($filter) {
+    if ($filter === 'ANY') {
+        return '有退貨申請';
+    }
+    return returnStatusMeta($filter)['label'];
+}
+
 function buildFilterQuery(array $overrides = []) {
     $base = [
         'page' => 'orders',
@@ -29,12 +65,16 @@ function buildFilterQuery(array $overrides = []) {
         'end_date' => isset($_GET['end_date']) ? $_GET['end_date'] : '',
         'keyword' => isset($_GET['keyword']) ? $_GET['keyword'] : '',
         'status' => isset($_GET['status']) ? $_GET['status'] : '',
+        'return_filter' => isset($_GET['return_filter']) ? $_GET['return_filter'] : '',
         'order_id' => isset($_GET['order_id']) ? $_GET['order_id'] : '',
     ];
 
     $merged = array_merge($base, $overrides);
     if (isset($merged['order_id']) && $merged['order_id'] === '') {
         unset($merged['order_id']);
+    }
+    if (isset($merged['return_filter']) && $merged['return_filter'] === '') {
+        unset($merged['return_filter']);
     }
 
     return 'backend.php?' . http_build_query($merged);
@@ -56,6 +96,16 @@ $startDate = isset($_GET['start_date']) ? trim($_GET['start_date']) : '';
 $endDate = isset($_GET['end_date']) ? trim($_GET['end_date']) : '';
 $keyword = isset($_GET['keyword']) ? trim($_GET['keyword']) : '';
 $statusFilter = isset($_GET['status']) ? trim($_GET['status']) : '';
+$returnFilter = isset($_GET['return_filter']) ? strtoupper(trim($_GET['return_filter'])) : '';
+if ($returnFilter !== '' && !in_array($returnFilter, $allowedReturnFilters, true)) {
+    $returnFilter = '';
+}
+
+$returnTableExists = false;
+$returnTableRes = $conn->query("SHOW TABLES LIKE 'return_requests'");
+if ($returnTableRes && $returnTableRes->num_rows > 0) {
+    $returnTableExists = true;
+}
 
 $conditions = [];
 $params = [];
@@ -87,21 +137,57 @@ if ($statusFilter !== '' && in_array($statusFilter, $allowedStatuses, true)) {
     $types .= 's';
 }
 
+if ($returnTableExists && $returnFilter !== '') {
+    if ($returnFilter === 'ANY') {
+        $conditions[] = 'lr.return_id IS NOT NULL';
+    } else {
+        $conditions[] = 'lr.status = ?';
+        $params[] = $returnFilter;
+        $types .= 's';
+    }
+}
+
 $whereClause = '';
 if (!empty($conditions)) {
     $whereClause = 'WHERE ' . implode(' AND ', $conditions);
 }
 
 $orders = [];
+$returnJoinSql = '';
+$returnSelectSql = "NULL AS latest_return_id, NULL AS latest_return_status, NULL AS latest_return_created_at";
+if ($returnTableExists) {
+    $returnSelectSql = "lr.return_id AS latest_return_id, lr.status AS latest_return_status, lr.created_at AS latest_return_created_at";
+    $returnJoinSql = "
+    LEFT JOIN (
+        SELECT rr.*
+        FROM return_requests rr
+        JOIN (
+            SELECT order_id, MAX(return_id) AS latest_return_id
+            FROM return_requests
+            GROUP BY order_id
+        ) latest_rr ON latest_rr.latest_return_id = rr.return_id
+    ) lr ON lr.order_id = o.order_id";
+}
+
+$pendingReturnCount = 0;
+if ($returnTableExists) {
+    $pendingReturnRes = $conn->query("SELECT COUNT(*) AS cnt FROM return_requests WHERE status = 'PENDING'");
+    if ($pendingReturnRes && $pendingReturnRow = $pendingReturnRes->fetch_assoc()) {
+        $pendingReturnCount = intval($pendingReturnRow['cnt'] ?? 0);
+    }
+}
+
 $orderSql = "
     SELECT o.order_id, o.user_id, o.coupon_id, o.discount_amount, o.total_amount, o.status, o.created_at,
         o.recipient_name, o.recipient_phone, u.email, u.name AS user_name,
         c.coupon_name, c.coupon_code,
-           COUNT(oi.order_item_id) AS item_count
+        {$returnSelectSql},
+        COUNT(DISTINCT oi.order_item_id) AS item_count
     FROM orders o
     LEFT JOIN users u ON u.user_id = o.user_id
     LEFT JOIN coupons c ON c.coupon_id = o.coupon_id
     LEFT JOIN order_items oi ON oi.order_id = o.order_id
+    {$returnJoinSql}
     {$whereClause}
     GROUP BY o.order_id
     ORDER BY o.created_at DESC
@@ -124,7 +210,7 @@ if ($orderResult) {
 }
 ?>
 
-<link rel="stylesheet" href="../css/products.css">
+<link rel="stylesheet" href="../css/products.css?v=<?php echo @filemtime(__DIR__ . '/../css/products.css') ?: time(); ?>">
 
 <style>
     .om-layout { display: grid; gap: 18px; }
@@ -142,10 +228,76 @@ if ($orderResult) {
     .pm-status-delivered { background: #ede9fe; color: #6d28d9; }
     .pm-status-completed { background: #dcfce7; color: #166534; }
     .pm-status-cancelled { background: #fee2e2; color: #991b1b; }
+    .return-pending { background:#fef3c7; color:#92400e; }
+    .return-approved { background:#dbeafe; color:#1d4ed8; }
+    .return-rejected { background:#fee2e2; color:#991b1b; }
+    .return-refunded { background:#dcfce7; color:#166534; }
+    .return-help { margin:10px 0 0; color:#64748b; font-size:13px; line-height:1.6; }
+    .om-alert { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 16px; border:1px solid #fed7aa; background:#fff7ed; color:#9a3412; border-radius:12px; margin-bottom:16px; flex-wrap:wrap; }
+    .om-alert strong { color:#7c2d12; }
+    .om-return-filter { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+    .om-return-filter a { text-decoration:none; }
+    .om-return-filter .is-active { border-color:#db6b6b; background:#fff5f5; color:#b91c1c; }
+    .om-return-cell { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+    .om-return-muted { color:#94a3b8; font-size:12px; }
+    .om-row-return-pending { background:#fffaf0; }
+    .om-detail-card { position:relative; }
+    .om-detail-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .om-detail-header h2 { margin:0; }
+    .om-drawer-backdrop { display:none; }
+    .om-drawer-close { white-space:nowrap; }
     .om-empty { padding: 22px 0; text-align: center; color: #94a3b8; }
     .om-detail-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    body.om-drawer-open { overflow:hidden; }
+    body.om-drawer-open .om-drawer-backdrop {
+        display:block;
+        position:fixed;
+        inset:0;
+        background:rgba(15,23,42,0.42);
+        z-index:9998;
+        cursor:pointer;
+    }
+    body.om-drawer-enhanced .om-detail-card.om-detail-drawer {
+        position:fixed;
+        top:0;
+        right:0;
+        bottom:0;
+        z-index:9999;
+        width:min(820px, 100vw);
+        max-height:100vh;
+        overflow:auto;
+        border-radius:0;
+        margin:0;
+        box-shadow:-18px 0 44px rgba(15,23,42,0.2);
+        transform:translateX(100%);
+        transition:transform .2s ease;
+    }
+    body.om-drawer-enhanced .om-detail-card.om-detail-drawer.is-open { transform:translateX(0); }
+    body.om-drawer-enhanced .om-detail-card.om-detail-drawer .om-detail-header {
+        position:sticky;
+        top:0;
+        z-index:2;
+        background:#fff;
+        padding-bottom:12px;
+        border-bottom:1px solid #e2e8f0;
+    }
     @media (max-width: 980px) {
         .om-detail-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+        .om-table-actions,
+        .om-bulk-left,
+        .om-detail-actions {
+            align-items: stretch;
+            flex-direction: column;
+        }
+        #bulkOrdersForm,
+        #deleteOrderForm {
+            display: grid !important;
+            gap: 10px;
+            align-items: stretch !important;
+        }
+        #delete_older_days { max-width: none !important; }
     }
 </style>
 
@@ -162,11 +314,11 @@ if ($orderResult) {
             <input type="hidden" name="page" value="orders">
             <div class="pm-grid">
                 <div class="pm-col-3">
-                    <label for="start_date">Start Date</label>
+                    <label for="start_date">開始日期</label>
                     <input class="pm-input" type="date" id="start_date" name="start_date" value="<?php echo h($startDate); ?>">
                 </div>
                 <div class="pm-col-3">
-                    <label for="end_date">End Date</label>
+                    <label for="end_date">結束日期</label>
                     <input class="pm-input" type="date" id="end_date" name="end_date" value="<?php echo h($endDate); ?>">
                 </div>
                 <div class="pm-col-3">
@@ -182,6 +334,17 @@ if ($orderResult) {
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="pm-col-3">
+                    <label for="return_filter">退貨狀態</label>
+                    <select class="pm-select" id="return_filter" name="return_filter">
+                        <option value="">全部訂單</option>
+                        <option value="ANY" <?php echo $returnFilter === 'ANY' ? 'selected' : ''; ?>>有退貨申請</option>
+                        <?php foreach (['PENDING', 'APPROVED', 'REJECTED', 'REFUNDED'] as $returnStatus): ?>
+                            <?php $filterMeta = returnStatusMeta($returnStatus); ?>
+                            <option value="<?php echo h($returnStatus); ?>" <?php echo $returnFilter === $returnStatus ? 'selected' : ''; ?>><?php echo h($filterMeta['label']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div class="pm-col-12 om-detail-actions">
                     <button class="pm-btn pm-btn-main" type="submit">搜尋</button>
                     <a class="pm-btn pm-btn-sub" href="backend.php?page=orders">重置</a>
@@ -191,6 +354,17 @@ if ($orderResult) {
     </section>
 
     <section class="pm-card">
+        <?php if ($returnTableExists && $pendingReturnCount > 0): ?>
+            <div class="om-alert">
+                <div><strong>有 <?php echo number_format($pendingReturnCount); ?> 筆退貨待審核。</strong> 建議先處理待審核退貨，避免會員等待。</div>
+                <a class="pm-btn pm-btn-sm pm-btn-main" href="<?php echo h(buildFilterQuery(['return_filter' => 'PENDING', 'order_id' => ''])); ?>">查看待審核退貨</a>
+            </div>
+        <?php endif; ?>
+        <div class="om-return-filter" aria-label="退貨篩選">
+            <a class="pm-btn pm-btn-sm pm-btn-sub <?php echo $returnFilter === '' ? 'is-active' : ''; ?>" href="<?php echo h(buildFilterQuery(['return_filter' => '', 'order_id' => ''])); ?>">全部訂單</a>
+            <a class="pm-btn pm-btn-sm pm-btn-sub <?php echo $returnFilter === 'ANY' ? 'is-active' : ''; ?>" href="<?php echo h(buildFilterQuery(['return_filter' => 'ANY', 'order_id' => ''])); ?>">有退貨</a>
+            <a class="pm-btn pm-btn-sm pm-btn-sub <?php echo $returnFilter === 'PENDING' ? 'is-active' : ''; ?>" href="<?php echo h(buildFilterQuery(['return_filter' => 'PENDING', 'order_id' => ''])); ?>">待審核</a>
+        </div>
         <div class="om-table-actions">
             <div class="om-bulk-left">
                 <form method="POST" action="backend_action.php" id="bulkOrdersForm">
@@ -223,6 +397,7 @@ if ($orderResult) {
                             <th>總金額</th>
                             <th>商品件數</th>
                             <th>狀態</th>
+                            <th>退貨</th>
                             <th>下單時間</th>
                             <th>操作</th>
                         </tr>
@@ -236,8 +411,11 @@ if ($orderResult) {
                             if ($order['status'] === 'DELIVERED') { $statusClass = 'pm-status-delivered'; }
                             if ($order['status'] === 'COMPLETED') { $statusClass = 'pm-status-completed'; }
                             if ($order['status'] === 'CANCELLED') { $statusClass = 'pm-status-cancelled'; }
+                            $latestReturnStatus = $order['latest_return_status'] ?? '';
+                            $latestReturnMeta = $latestReturnStatus !== '' ? returnStatusMeta($latestReturnStatus) : null;
+                            $detailHref = buildFilterQuery(['order_id' => intval($order['order_id'])]) . '#order-detail';
                             ?>
-                            <tr>
+                            <tr class="<?php echo $latestReturnStatus === 'PENDING' ? 'om-row-return-pending' : ''; ?>">
                                 <td>
                                     <input type="checkbox" class="js-order-checkbox" name="order_ids[]" form="bulkOrdersForm" value="<?php echo intval($order['order_id']); ?>">
                                 </td>
@@ -249,9 +427,19 @@ if ($orderResult) {
                                 <td>NT$ <?php echo number_format((float)$order['total_amount']); ?></td>
                                 <td><?php echo intval($order['item_count']); ?> 件</td>
                                 <td><span class="pm-badge <?php echo h($statusClass); ?>"><?php echo h(orderStatusLabel($order['status'])); ?></span></td>
+                                <td>
+                                    <div class="om-return-cell">
+                                        <?php if ($latestReturnMeta): ?>
+                                            <span class="pm-badge <?php echo h($latestReturnMeta['class']); ?>"><?php echo h($latestReturnMeta['label']); ?></span>
+                                            <span class="om-return-muted"><?php echo h($order['latest_return_created_at']); ?></span>
+                                        <?php else: ?>
+                                            <span class="om-return-muted">無退貨</span>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
                                 <td><?php echo h($order['created_at']); ?></td>
                                 <td>
-                                    <a class="pm-btn pm-btn-edit pm-btn-sm" href="<?php echo h(buildFilterQuery(['order_id' => intval($order['order_id'])])); ?>">查看詳情</a>
+                                    <a class="pm-btn pm-btn-edit pm-btn-sm" href="<?php echo h($detailHref); ?>">查看詳情</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -261,8 +449,19 @@ if ($orderResult) {
         <?php endif; ?>
     </section>
 
-    <section class="pm-card">
-        <h2 class="om-section-title">訂單詳細資訊</h2>
+    <div class="om-drawer-backdrop" id="orderDetailBackdrop" hidden></div>
+    <section id="order-detail" class="pm-card om-detail-card <?php echo $selectedOrderId > 0 ? 'om-detail-drawer' : ''; ?>" data-order-detail="<?php echo $selectedOrderId > 0 ? '1' : '0'; ?>">
+        <div class="om-detail-header">
+            <div>
+                <h2 class="om-section-title">訂單詳細資訊</h2>
+                <?php if ($selectedOrderId > 0): ?>
+                    <div class="om-meta">目前查看訂單 #<?php echo intval($selectedOrderId); ?></div>
+                <?php endif; ?>
+            </div>
+            <?php if ($selectedOrderId > 0): ?>
+                <a class="pm-btn pm-btn-sub pm-btn-sm om-drawer-close" data-close-order-drawer href="<?php echo h(buildFilterQuery(['order_id' => ''])); ?>">關閉詳情</a>
+            <?php endif; ?>
+        </div>
         <?php if ($selectedOrderId <= 0): ?>
             <div class="om-empty">請從上方列表點擊查看詳情。</div>
         <?php else: ?>
@@ -373,7 +572,12 @@ if ($orderResult) {
                                     <tr>
                                         <td>
                                             <div><?php echo h($item['product_name']); ?></div>
-                                            <div class="om-meta"><?php echo h(($item['size_inches'] ?: '-') . ' / ' . ($item['color'] ?: '-')); ?></div>
+                                            <?php
+                                                $sizeText = orderSizeLabel($item['size_inches'] ?? '');
+                                                $colorText = trim((string)($item['color'] ?? ''));
+                                                $variantText = trim(($sizeText !== '' ? $sizeText : '-') . ' / ' . ($colorText !== '' ? $colorText : '-'));
+                                            ?>
+                                            <div class="om-meta"><?php echo h($variantText); ?></div>
                                         </td>
                                         <td><?php echo h($item['sku_code']); ?></td>
                                         <td><?php echo intval($item['quantity']); ?></td>
@@ -421,11 +625,12 @@ if ($orderResult) {
                 </div>
 
                 <?php if ($returnRequest): ?>
+                    <?php $returnMeta = returnStatusMeta($returnRequest['status'] ?? ''); ?>
                     <div style="margin-top:18px; padding:16px; border:1px solid #e2e8f0; border-radius:12px; background:#f8fafc;">
                         <h3 class="om-section-title">退貨申請審核</h3>
                         <dl class="om-kv">
                             <dt>申請人</dt><dd><?php echo h(($returnRequest['requester_name'] ?? '') ?: ($returnRequest['requester_email'] ?? '-')); ?></dd>
-                            <dt>目前狀態</dt><dd><?php echo h($returnRequest['status']); ?></dd>
+                            <dt>目前狀態</dt><dd><span class="pm-badge <?php echo h($returnMeta['class']); ?>"><?php echo h($returnMeta['label']); ?></span></dd>
                             <dt>申請時間</dt><dd><?php echo h($returnRequest['created_at']); ?></dd>
                             <dt>退貨原因</dt><dd><?php echo nl2br(h($returnRequest['reason'])); ?></dd>
                             <?php if (!empty($returnRequest['admin_note'])): ?>
@@ -442,9 +647,11 @@ if ($orderResult) {
                                     <label for="return_status">退貨狀態</label>
                                     <select class="pm-select" id="return_status" name="return_status">
                                         <?php foreach (['PENDING', 'APPROVED', 'REJECTED', 'REFUNDED'] as $returnStatus): ?>
-                                            <option value="<?php echo h($returnStatus); ?>" <?php echo $returnRequest['status'] === $returnStatus ? 'selected' : ''; ?>><?php echo h($returnStatus); ?></option>
+                                            <?php $optionMeta = returnStatusMeta($returnStatus); ?>
+                                            <option value="<?php echo h($returnStatus); ?>" <?php echo $returnRequest['status'] === $returnStatus ? 'selected' : ''; ?>><?php echo h($optionMeta['label']); ?></option>
                                         <?php endforeach; ?>
                                     </select>
+                                    <p class="return-help"><?php echo h($returnMeta['hint']); ?></p>
                                 </div>
                                 <div class="pm-col-9">
                                     <label for="return_admin_note">審核備註</label>
@@ -493,6 +700,50 @@ if ($orderResult) {
             selectAll.checked = checkboxes.length > 0 && checkboxes.every(item => item.checked);
         });
     });
+
+    const orderDrawer = document.querySelector('[data-order-detail="1"]');
+    const orderBackdrop = document.getElementById('orderDetailBackdrop');
+    const closeDrawerLink = document.querySelector('[data-close-order-drawer]');
+
+    if (orderDrawer && orderBackdrop) {
+        document.body.classList.add('om-drawer-enhanced', 'om-drawer-open');
+        orderDrawer.classList.add('is-open');
+        orderBackdrop.hidden = false;
+        orderBackdrop.style.display = 'block';
+
+        const closeDrawer = (event) => {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            orderDrawer.classList.remove('is-open');
+            document.body.classList.remove('om-drawer-open', 'om-drawer-enhanced');
+            orderBackdrop.hidden = true;
+            orderBackdrop.style.display = 'none';
+            if (closeDrawerLink && window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', closeDrawerLink.href);
+            }
+        };
+
+        orderBackdrop.addEventListener('click', closeDrawer);
+        if (closeDrawerLink) {
+            closeDrawerLink.addEventListener('click', closeDrawer);
+        }
+        document.addEventListener('click', (event) => {
+            if (!document.body.classList.contains('om-drawer-open')) {
+                return;
+            }
+            if (orderDrawer.contains(event.target)) {
+                return;
+            }
+            closeDrawer(event);
+        }, true);
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeDrawer(event);
+            }
+        });
+    }
 
     function confirmDeleteOrder() {
         const deleteOlderDays = parseInt(document.getElementById('delete_older_days').value) || 0;

@@ -95,7 +95,7 @@ if (!empty($_GET['success'])) {
 }
 ?>
 
-<link rel="stylesheet" href="../css/products.css">
+<link rel="stylesheet" href="../css/products.css?v=<?php echo @filemtime(__DIR__ . '/../css/products.css') ?: time(); ?>">
 
 <style>
 .member-page { display: flex; flex-direction: column; gap: 18px; }
@@ -133,7 +133,7 @@ if (!empty($_GET['success'])) {
     <div class="member-head">
         <div>
             <h1 class="member-title">會員管理</h1>
-            <p class="member-subtitle">管理會員等級、點數與帳號狀態；VIP/VVIP 才會套用商品會員價。</p>
+            <p class="member-subtitle">管理會員等級、點數與帳號狀態；只有 VIP/VVIP 會套用商品 VIP 價。</p>
         </div>
         <form class="member-search" method="GET" action="backend.php">
             <input type="hidden" name="page" value="members">

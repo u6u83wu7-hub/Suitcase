@@ -20,7 +20,7 @@ $admin_username = isset($_SESSION['admin_username']) ? $_SESSION['admin_username
 $page = isset($_GET['page']) ? $_GET['page'] : 'profile'; // 預設首頁
 
 $allowed = [
-    'dashboard', 'products', 'supplier_products', 'supplier_supplies', 'request_supply', 'categories', 'orders', 'coupon', 'members', 'customer_service', 'marketing', 'system', 'profile', 'edit_product'
+    'dashboard', 'products', 'supplier_products', 'supplier_supplies', 'request_supply', 'categories', 'orders', 'coupon', 'members', 'customer_service', 'marketing', 'system', 'profile', 'edit_product', 'manage_feedback'
 ];
 if (!in_array($page, $allowed)) {
     $page = 'profile';
@@ -148,13 +148,15 @@ if ($admin_role_id === 3) {
         .menu a::before { content: '📁'; margin-right: 12px; font-size: 14px; }
         .menu li:nth-child(1) a::before { content: '📊'; }
         .menu li:nth-child(2) a::before { content: '📦'; }
-        .menu li:nth-child(3) a::before { content: '🏷️'; }
-        .menu li:nth-child(4) a::before { content: '📜'; }
-        .menu li:nth-child(5) a::before { content: '🎟️'; }
-        .menu li:nth-child(6) a::before { content: '👥'; }
-        .menu li:nth-child(7) a::before { content: '💬'; }
-        .menu li:nth-child(8) a::before { content: '🎯'; }
-        .menu li:nth-child(9) a::before { content: '⚙️'; }
+        .menu li:nth-child(3) a::before { content: '🚚'; } /* 供應表單 */
+        .menu li:nth-child(4) a::before { content: '📑'; } /* 分類管理 */
+        .menu li:nth-child(5) a::before { content: '🛒'; } /* 訂單管理 */
+        .menu li:nth-child(6) a::before { content: '🎟️'; } /* 優惠卷管理 */
+        .menu li:nth-child(7) a::before { content: '👥'; } /* 會員管理 */
+        .menu li:nth-child(8) a::before { content: '🎧'; } /* 客服管理 */
+        .menu li:nth-child(9) a::before { content: '📢'; } /* 行銷內容管理 */
+        .menu li:nth-child(10) a::before { content: '⭐'; } /* 評價與FAQ管理 */
+        .menu li:nth-child(11) a::before { content: '⚙️'; } /* 系統權限管理 */
         
         .main { flex: 1; padding: 32px; min-width: 0;}
         .card { background: var(--card-bg); padding: 28px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.02); }
@@ -163,6 +165,56 @@ if ($admin_role_id === 3) {
         button { padding:12px 18px; border:none; background:#2c3e50; color:#fff; border-radius:6px; cursor:pointer; font-weight:700; }
         button.alt { background: var(--primary); }
         button:hover { opacity: 0.9; }
+        @media (max-width: 760px) {
+            html,
+            body {
+                max-width: 100vw;
+            }
+            body { overflow-x: hidden; }
+            .app { display: block; max-width: 100vw; overflow-x: hidden; }
+            .sidebar,
+            .sidebar.collapsed {
+                width: auto;
+                padding: 14px 12px;
+                overflow: hidden;
+            }
+            .brand-row { margin-bottom: 10px; }
+            .sidebar.collapsed .brand,
+            .sidebar.collapsed .admin-box {
+                display: block;
+            }
+            .menu {
+                display: flex;
+                gap: 8px;
+                width: 100%;
+                max-width: 100%;
+                flex-wrap: wrap;
+                overflow: hidden;
+            }
+            .menu li { flex: 1 1 150px; margin: 0; min-width: 0; }
+            .menu a { padding: 10px 12px; white-space: normal; }
+            .sidebar.collapsed .menu a .text {
+                opacity: 1;
+                width: auto;
+                pointer-events: auto;
+            }
+            .main { padding: 16px 12px; }
+            .card { padding: 18px; }
+            .main,
+            .pm-wrap,
+            .pm-card,
+            .pm-table-wrap {
+                max-width: 100%;
+                min-width: 0;
+                box-sizing: border-box;
+            }
+            .pm-table-wrap {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            .toggle-btn { display: none; }
+            input, select, textarea, button { max-width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -177,7 +229,7 @@ if ($admin_role_id === 3) {
             <div class="name">您好，<?php echo htmlspecialchars($admin_username); ?></div>
             <div class="muted" style="margin-top:4px; color:#94a3b8; font-size:14px;">管理者介面</div>
             <div style="margin-top:12px;">
-                <a href="admin_logout.php" style="color: var(--primary); font-size:13px; text-decoration:none; font-weight:700;">🚪 安全登出</a>
+                <a href="admin_logout.php" style="color: var(--primary); font-size:13px; text-decoration:none; font-weight:700;">🚪 登出</a>
             </div>
         </div>
 
@@ -196,11 +248,13 @@ if ($admin_role_id === 3) {
                 <li><a href="backend.php?page=members" class="<?php echo $page=='members' ? 'active' : ''; ?>"><span class="text">會員管理</span></a></li>
                 <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>"><span class="text">客服管理</span></a></li>
                 <li><a href="backend.php?page=marketing" class="<?php echo $page=='marketing' ? 'active' : ''; ?>"><span class="text">行銷內容管理</span></a></li>
+                    <li><a href="backend.php?page=manage_feedback" class="<?php echo $page=='manage_feedback' ? 'active' : ''; ?>"><span class="text">評價管理</span></a></li>
                 <li><a href="backend.php?page=system" class="<?php echo $page=='system' ? 'active' : ''; ?>"><span class="text">系統權限管理</span></a></li>
                 <li style="margin-top:20px;"><a href="backend.php?page=profile" class="<?php echo $page=='profile' ? 'active' : ''; ?>"><span class="text">管理者資料</span></a></li>
             <?php elseif ($admin_role_id === 2): ?>
                 <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>"><span class="text">客服管理</span></a></li>
             <?php else: ?>
+                
                 <li><a href="backend.php?page=customer_service" class="<?php echo $page=='customer_service' ? 'active' : ''; ?>"><span class="text">客服管理</span></a></li>
                 <li><a href="backend.php?page=coupon" class="<?php echo $page=='coupon' ? 'active' : ''; ?>"><span class="text">優惠卷管理</span></a></li>
                 <li style="margin-top:20px;"><a href="backend.php?page=profile" class="<?php echo $page=='profile' ? 'active' : ''; ?>"><span class="text">管理者資料</span></a></li>

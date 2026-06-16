@@ -120,6 +120,20 @@ $countResult = $conn->query($countSql);
 $totalProducts = ($countResult && $countResult->num_rows > 0) ? intval($countResult->fetch_assoc()['total']) : 0;
 $totalPages = max(1, ceil($totalProducts / $perPage));
 
+$variantAggregateSql = "
+    SELECT
+        product_id,
+        COUNT(*) AS sku_count,
+        COALESCE(SUM(stock_available), 0) AS total_stock,
+        COALESCE(SUM(CASE WHEN stock_available = 0 THEN 1 ELSE 0 END), 0) AS out_sku_count,
+        COALESCE(SUM(CASE WHEN stock_available > 0 AND stock_available <= {$lowStockThreshold} THEN 1 ELSE 0 END), 0) AS low_sku_count,
+        COALESCE(MIN(stock_available), 0) AS min_stock,
+        MIN(CASE WHEN special_price IS NOT NULL AND special_price > 0 AND special_price < original_price THEN special_price ELSE original_price END) AS min_price,
+        MAX(CASE WHEN special_price IS NOT NULL AND special_price > 0 AND special_price < original_price THEN special_price ELSE original_price END) AS max_price
+    FROM product_variants
+    GROUP BY product_id
+";
+
 $productSql = "
     SELECT
         p.product_id,
@@ -127,13 +141,13 @@ $productSql = "
         MAX(s.name) AS supplier_name,
         p.status,
         p.is_featured,
-        COUNT(v.variant_id) AS sku_count,
-        COALESCE(SUM(v.stock_available), 0) AS total_stock,
-        COALESCE(SUM(CASE WHEN v.stock_available = 0 THEN 1 ELSE 0 END), 0) AS out_sku_count,
-        COALESCE(SUM(CASE WHEN v.stock_available > 0 AND v.stock_available <= {$lowStockThreshold} THEN 1 ELSE 0 END), 0) AS low_sku_count,
-        COALESCE(MIN(v.stock_available), 0) AS min_stock,
-        MIN(COALESCE(v.special_price, v.original_price)) AS min_price,
-        MAX(COALESCE(v.special_price, v.original_price)) AS max_price,
+        COALESCE(MAX(va.sku_count), 0) AS sku_count,
+        COALESCE(MAX(va.total_stock), 0) AS total_stock,
+        COALESCE(MAX(va.out_sku_count), 0) AS out_sku_count,
+        COALESCE(MAX(va.low_sku_count), 0) AS low_sku_count,
+        COALESCE(MAX(va.min_stock), 0) AS min_stock,
+        MAX(va.min_price) AS min_price,
+        MAX(va.max_price) AS max_price,
         GROUP_CONCAT(DISTINCT c.name ORDER BY c.name SEPARATOR ', ') AS category_names,
         (
             SELECT pi.image_url
@@ -144,7 +158,7 @@ $productSql = "
         ) AS main_image
     FROM products p
     LEFT JOIN suppliers s ON s.supplier_id = p.supplier_id
-    LEFT JOIN product_variants v ON v.product_id = p.product_id
+    LEFT JOIN ({$variantAggregateSql}) va ON va.product_id = p.product_id
     LEFT JOIN product_category_links pcl ON pcl.product_id = p.product_id
     LEFT JOIN categories c ON c.category_id = pcl.category_id
     {$whereClause}
@@ -176,7 +190,7 @@ function buildFilterQuery(array $overrides = []) {
 
 $isEditMode = (!$isVendorAccount && isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id']) && intval($_GET['id']) > 0);
 ?>
-<link rel="stylesheet" href="../css/products.css">
+<link rel="stylesheet" href="../css/products.css?v=<?php echo @filemtime(__DIR__ . '/../css/products.css') ?: time(); ?>">
 
 <div class="pm-wrap">
     <div class="pm-head">

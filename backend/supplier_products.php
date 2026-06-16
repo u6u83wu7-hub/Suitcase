@@ -11,6 +11,17 @@ $supplierId = 0;
 $supplierName = '';
 $adminId = intval($_SESSION['admin_id'] ?? 0);
 
+function supplyRequestStatusMeta($status) {
+    $status = strtoupper((string)$status);
+    $map = [
+        'PENDING' => ['label' => '待供應', 'class' => 'pm-off', 'hint' => '管理員已提出需求，尚未有供應紀錄。'],
+        'PARTIAL' => ['label' => '部分供應', 'class' => 'pm-featured', 'hint' => '已供應部分數量，仍有剩餘待補。'],
+        'COMPLETED' => ['label' => '已完成', 'class' => 'pm-on', 'hint' => '供應數量已滿足需求。'],
+        'CANCELLED' => ['label' => '已取消', 'class' => 'pm-off', 'hint' => '此供應請求已取消，不需再處理。'],
+    ];
+    return $map[$status] ?? ['label' => $status, 'class' => 'pm-off', 'hint' => '請確認此供應請求狀態。'];
+}
+
 $supplierStmt = $conn->prepare("SELECT supplier_id, name FROM suppliers WHERE admin_id = ? LIMIT 1");
 $supplierStmt->bind_param('i', $adminId);
 $supplierStmt->execute();
@@ -91,7 +102,26 @@ while ($requestRow = $requestResult->fetch_assoc()) {
     $supplyRequests[] = $requestRow;
 }
 $requestStmt->close();
+
+$pendingSupplyRequestCount = 0;
+foreach ($supplyRequests as $requestRow) {
+    $requestStatus = strtoupper((string)$requestRow['request_status']);
+    $remainingQuantity = intval($requestRow['remaining_quantity'] ?? 0);
+    if (!in_array($requestStatus, ['COMPLETED', 'CANCELLED'], true) && $remainingQuantity > 0) {
+        $pendingSupplyRequestCount++;
+    }
+}
 ?>
+
+<style>
+    .vendor-supply-grid { display:grid; grid-template-columns: 1.1fr 0.9fr; gap:20px; align-items:start; }
+    .vendor-request-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    @media (max-width: 820px) {
+        .vendor-supply-grid { grid-template-columns:1fr; }
+        .vendor-request-actions { align-items:stretch; flex-direction:column; }
+        .vendor-request-actions .alt { width:100%; }
+    }
+</style>
 
 <h1 style="font-size:24px; margin-top:0; margin-bottom:4px;">🏪 供應商品</h1>
 <p class="muted">廠商：<?php echo htmlspecialchars($supplierName); ?>。此頁會把你送出的供應資料寫進供應紀錄表。</p>
@@ -102,7 +132,7 @@ $requestStmt->close();
     </div>
 <?php endif; ?>
 
-<div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:20px; align-items:start;">
+<div class="vendor-supply-grid">
     <div style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px;">
         <h2 style="margin-top:0; font-size:18px; color:#1e293b;">送出供應資料</h2>
 
@@ -166,7 +196,7 @@ $requestStmt->close();
 <div style="margin-top:20px; background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px;">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
         <h2 style="margin:0; font-size:18px; color:#1e293b;">供應請求</h2>
-        <span style="color:#64748b; font-size:13px;">可供應的請求會顯示「供應」按鈕</span>
+        <span style="color:#64748b; font-size:13px;">尚有 <?php echo intval($pendingSupplyRequestCount); ?> 筆可供應請求；可供應的請求會顯示「供應」按鈕</span>
     </div>
 
     <?php if (empty($supplyRequests)): ?>
@@ -180,6 +210,7 @@ $requestStmt->close();
                     $remainingQuantity = intval($request['remaining_quantity'] ?? max(0, intval($request['requested_quantity']) - $suppliedQuantity));
                     $canSupply = !in_array($status, ['COMPLETED', 'CANCELLED'], true) && $remainingQuantity > 0;
                     $requestFormId = 'request-form-' . intval($request['request_id']);
+                    $statusMeta = supplyRequestStatusMeta($status);
                 ?>
                 <div id="request-card-<?php echo intval($request['request_id']); ?>" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px;">
                     <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
@@ -199,8 +230,8 @@ $requestStmt->close();
                                 <div style="font-size:13px; color:#64748b; margin-top:4px;">備註：<?php echo htmlspecialchars($request['note']); ?></div>
                             <?php endif; ?>
                         </div>
-                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                            <span id="request-badge-<?php echo intval($request['request_id']); ?>" class="pm-badge <?php echo $status === 'PENDING' ? 'pm-off' : ($status === 'PARTIAL' ? 'pm-featured' : 'pm-on'); ?>"><?php echo htmlspecialchars($request['request_status']); ?></span>
+                        <div class="vendor-request-actions">
+                            <span id="request-badge-<?php echo intval($request['request_id']); ?>" class="pm-badge <?php echo htmlspecialchars($statusMeta['class']); ?>" title="<?php echo htmlspecialchars($statusMeta['hint']); ?>"><?php echo htmlspecialchars($statusMeta['label']); ?></span>
                             <?php if ($canSupply): ?>
                                 <button id="supply-btn-<?php echo intval($request['request_id']); ?>" type="button" class="alt" style="padding:8px 14px;" onclick="toggleRequestForm('<?php echo $requestFormId; ?>')">供應</button>
                             <?php endif; ?>

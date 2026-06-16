@@ -54,7 +54,7 @@ if ($rRes) {
 }
 ?>
 
-<link rel="stylesheet" href="../css/products.css">
+<link rel="stylesheet" href="../css/products.css?v=<?php echo @filemtime(__DIR__ . '/../css/products.css') ?: time(); ?>">
 
 <div class="pm-wrap">
     <div class="pm-head">

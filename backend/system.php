@@ -200,7 +200,7 @@ $pointRows = sysFetchRows($conn, "
 
 <style>
     .sys-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; align-items: start; margin-top: 20px; }
-    .sys-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }
+    .sys-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; min-width: 0; }
     .sys-title { font-size: 16px; font-weight: 800; color: #1e293b; margin: 0 0 16px 0; }
     
     /* 提示泡泡 */
@@ -209,19 +209,25 @@ $pointRows = sysFetchRows($conn, "
     .sys-alert.error { background: #fff1f2; color: #991b1b; border: 1px solid #fecaca; }
 
     /* 表格設計 */
-    .sys-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-    .sys-table th { padding: 12px; color: #64748b; border-bottom: 1px solid #edf2f7; background: #f8fafc; }
-    .sys-table td { padding: 14px 12px; border-bottom: 1px solid #f1f5f9; }
+    .sys-table-wrap { overflow-x: auto; border-radius: 8px; }
+    .sys-table { width: 100%; min-width: 860px; border-collapse: collapse; text-align: left; font-size: 14px; table-layout: fixed; }
+    .sys-table th { padding: 12px; color: #64748b; border-bottom: 1px solid #edf2f7; background: #f8fafc; white-space: nowrap; }
+    .sys-table td { padding: 14px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; word-break: normal; overflow-wrap: normal; }
+    .sys-table th:nth-child(1), .sys-table td:nth-child(1) { width: 70px; }
+    .sys-table th:nth-child(2), .sys-table td:nth-child(2) { width: 220px; }
+    .sys-table th:nth-child(3), .sys-table td:nth-child(3) { width: 130px; }
+    .sys-table th:nth-child(4), .sys-table td:nth-child(4) { width: 110px; }
+    .sys-table th:nth-child(5), .sys-table td:nth-child(5) { width: 330px; }
     
-    .badge { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+    .badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; white-space: nowrap; line-height: 1.35; }
     .badge.super { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
     .badge.cs { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
     .badge.active { background: #ecfdf5; color: #065f46; }
     .badge.disabled { background: #f1f5f9; color: #64748b; text-decoration: line-through; }
 
-    .inline-form { display: flex; align-items: center; gap: 8px; margin: 0; }
-    .inline-form select { width: auto; padding: 6px 10px; margin: 0; font-size: 13px; }
-    .inline-btn { padding: 6px 12px; background: #334155; color: #fff; font-size: 12px; border-radius: 4px; }
+    .inline-form { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: nowrap; }
+    .inline-form select { width: auto; min-width: 118px; padding: 6px 10px; margin: 0; font-size: 13px; }
+    .inline-btn { padding: 6px 12px; background: #334155; color: #fff; font-size: 12px; border-radius: 4px; white-space: nowrap; min-width: 52px; }
     .inline-btn:hover { background: #111827; }
     .ops-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 24px; }
     .ops-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; overflow: hidden; }
@@ -237,6 +243,14 @@ $pointRows = sysFetchRows($conn, "
     @media (max-width: 1000px) {
         .sys-layout, .ops-grid { grid-template-columns: 1fr; }
     }
+    @media (max-width: 720px) {
+        .sys-card { padding: 16px; }
+        .sys-table { min-width: 820px; }
+        .inline-form { align-items: stretch; flex-direction: column; }
+        .inline-form select, .inline-form button { width: 100%; min-width: 0; }
+        .ops-card { padding: 14px; }
+        .ops-table { min-width: 560px; }
+    }
 </style>
 
 <h1 style="font-size:24px; margin-top:0; margin-bottom:4px;">⚙️ 系統與權限管理</h1>
@@ -249,6 +263,7 @@ $pointRows = sysFetchRows($conn, "
 <div class="sys-layout">
     <div class="sys-card">
         <h2 class="sys-title">📋 系統現存管理員清單</h2>
+        <div class="sys-table-wrap">
         <table class="sys-table">
             <thead>
                 <tr>
@@ -307,6 +322,7 @@ $pointRows = sysFetchRows($conn, "
                 <?php endforeach; ?>
             </tbody>
         </table>
+        </div>
     </div>
 
     <div class="sys-card" style="background: #f8fafc;">

@@ -59,6 +59,7 @@ $total_sales = 0;
 $order_count = 0;
 $member_count = 0;
 $low_stock_count = 0;
+$pending_return_count = 0;
 $aov = 0; // 客單價
 
 // 💡 統計銷售額與總有效訂單
@@ -92,6 +93,18 @@ if ($resMembers && $row = $resMembers->fetch_assoc()) {
 $resLowStockCount = $conn->query("SELECT COUNT(pv.variant_id) AS cnt FROM product_variants pv JOIN products p ON pv.product_id = p.product_id WHERE pv.stock_available <= 3{$vendorProductWhereSql}");
 if ($resLowStockCount && $row = $resLowStockCount->fetch_assoc()) {
     $low_stock_count = intval($row['cnt'] ?? 0);
+}
+
+// 統計待審核退貨，讓管理員一進後台就能看到需要處理的售後事件
+$returnTableRes = $conn->query("SHOW TABLES LIKE 'return_requests'");
+if ($returnTableRes && $returnTableRes->num_rows > 0) {
+    $resPendingReturns = $conn->query("SELECT COUNT(DISTINCT rr.return_id) AS cnt
+        FROM return_requests rr
+        JOIN orders o ON o.order_id = rr.order_id
+        WHERE rr.status = 'PENDING'{$vendorOrderWhereSql}");
+    if ($resPendingReturns && $row = $resPendingReturns->fetch_assoc()) {
+        $pending_return_count = intval($row['cnt'] ?? 0);
+    }
 }
 
 // 💡 抓取庫存吃緊的詳細清單 (前 4 筆顯示在側欄快照)
@@ -137,7 +150,7 @@ if ($resRank) {
     .dash-title-group h1 { margin: 0 0 4px 0; font-size: 24px; color: #1e293b; font-weight: 800; }
     
     /* 四核心卡片排版 */
-    .dash-cards-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-bottom: 32px; }
+    .dash-cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; margin-bottom: 32px; }
     .dash-stat-card { 
         background: #fff; 
         border: 1px solid #e2e8f0; 
@@ -222,6 +235,12 @@ if ($resRank) {
         <span class="card-label">📜 有效訂單總量</span>
         <span class="card-value"><?php echo number_format($order_count); ?> 筆</span>
         <span class="card-arrow">查看訂單 ➔</span>
+    </a>
+
+    <a href="backend.php?page=orders&return_filter=PENDING" class="dash-stat-card clickable <?php echo $pending_return_count > 0 ? 'danger-alert' : ''; ?>">
+        <span class="card-label">↩️ 待審核退貨</span>
+        <span class="card-value"><?php echo number_format($pending_return_count); ?> 筆</span>
+        <span class="card-arrow">前往審核 ➔</span>
     </a>
 
     <div class="dash-stat-card">

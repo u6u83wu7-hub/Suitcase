@@ -35,12 +35,14 @@ if ($requestedAction === 'submit_supplier_supply') {
     $csrfReturnPage = 'backend.php?page=supplier_supplies';
 } elseif ($requestedAction === 'submit_supply_request') {
     $csrfReturnPage = 'backend.php?page=request_supply';
-} elseif (in_array($requestedAction, ['add_coupon', 'edit_coupon', 'delete_coupon', 'send_coupon'], true)) {
+} elseif (in_array($requestedAction, ['add_coupon', 'edit_coupon', 'delete_coupon', 'send_coupon', 'upload_coupon_banner', 'delete_coupon_banner'], true)) {
     $csrfReturnPage = 'backend.php?page=coupon';
 } elseif (in_array($requestedAction, ['delete_order', 'update_return_request'], true)) {
     $csrfReturnPage = 'backend.php?page=orders';
 } elseif ($requestedAction === 'update_member') {
     $csrfReturnPage = 'backend.php?page=members';
+} elseif (in_array($requestedAction, ['add_product_qa', 'update_product_qa', 'toggle_product_qa'], true)) {
+    $csrfReturnPage = 'backend.php?page=customer_service';
 }
 
 apRequireCsrf($csrfReturnPage);
@@ -77,7 +79,7 @@ function backendActionAllowedForRole($action, $roleId) {
     }
 
     $roleActions = [
-        2 => ['reply_ticket_message', 'add_product_qa'],
+        2 => ['reply_ticket_message', 'add_product_qa', 'update_product_qa', 'toggle_product_qa'],
         3 => ['submit_supplier_supply'],
     ];
 
@@ -332,6 +334,8 @@ $actions = [
     'edit_coupon' => 'actions/CouponActions.php',
     'delete_coupon' => 'actions/CouponActions.php',
     'send_coupon' => 'actions/CouponActions.php',
+    'upload_coupon_banner' => 'actions/CouponActions.php',
+    'delete_coupon_banner' => 'actions/CouponActions.php',
     'update_member' => 'actions/MemberActions.php',
     'add_category' => 'actions/CategoryActions.php',
     'update_category' => 'actions/CategoryActions.php',
@@ -340,6 +344,8 @@ $actions = [
     'remove_product_from_category' => 'actions/CategoryActions.php', // 👈 新增這行
     'reply_ticket_message' => 'actions/CustomerServiceActions.php',
     'add_product_qa' => 'actions/CustomerServiceActions.php',
+    'update_product_qa' => 'actions/CustomerServiceActions.php', // 👈 新增這行：處理編輯 FAQ
+    'toggle_product_qa' => 'actions/CustomerServiceActions.php', // 👈 新增這行：處理啟用/停用 FAQ
     'submit_supplier_supply' => 'actions/SubmitSupplierSupply.php',
     'complete_supplier_supply' => 'actions/CompleteSupplierSupply.php',
     'submit_supply_request' => 'actions/SubmitSupplyRequest.php',
